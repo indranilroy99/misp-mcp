@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euxo pipefail
+
+# Install and start Docker (Amazon Linux 2023).
+dnf install -y docker
+systemctl enable --now docker
+
+IMAGE="${container_image}"
+
+# If the image is in ECR, log in first (instance role has read-only ECR).
+if echo "$IMAGE" | grep -q 'dkr\.ecr\.'; then
+  ECR_HOST="$(echo "$IMAGE" | cut -d/ -f1)"
+  ECR_REGION="$(echo "$ECR_HOST" | sed -E 's#.*\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com#\1#')"
+  aws ecr get-login-password --region "$ECR_REGION" \
+    | docker login --username AWS --password-stdin "$ECR_HOST"
+fi
+
+docker pull "$IMAGE"
+
+# misp-mcp holds no MISP key of its own; each caller sends their own key in the
+# X-MISP-Key header. TLS terminates at the ALB, so the container serves plain
+# HTTP on 8080 behind it.
+docker rm -f misp-mcp 2>/dev/null || true
+docker run -d --name misp-mcp --restart unless-stopped \
+  -p 8080:8080 \
+  ${env_flags} \
+  "$IMAGE"

@@ -1,0 +1,38 @@
+# Copy to terraform.tfvars and fill in. Do not commit terraform.tfvars.
+
+region = "us-east-1"
+
+vpc_id             = "vpc-xxxxxxxx"
+instance_subnet_id = "subnet-private-a"                       # EC2 instance (private)
+alb_subnet_ids     = ["subnet-private-a", "subnet-private-b"] # internal ALB
+
+# Build from the repo Dockerfile and push to your registry:
+#   docker build -t misp-mcp:1.2.0 .
+#   docker tag misp-mcp:1.2.0 <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
+#   docker push <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
+container_image = "<acct>.dkr.ecr.us-east-1.amazonaws.com/misp-mcp:1.2.0"
+
+instance_type   = "t3.small"
+ebs_volume_size = 20
+
+misp_url        = "https://misp.internal"
+misp_verify_tls = true
+
+# Leave empty for read-only. Set to enable the write tools.
+# misp_submission_event_id = "42"
+
+certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/xxxxxxxx"
+
+# Lock down to your VPN / office / caller networks. Never 0.0.0.0/0.
+allowed_cidrs = ["10.0.0.0/8"]
+
+internal_alb = true
+
+# Optional custom domain.
+# domain_name     = "misp-mcp.example.com"
+# route53_zone_id = "ZXXXXXXXXXXXXX"
+
+tags = {
+  Project = "misp-mcp"
+  Owner   = "security"
+}

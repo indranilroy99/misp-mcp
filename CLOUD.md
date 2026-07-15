@@ -5,10 +5,11 @@ private networking, the TLS load balancer, and the firewall. The application
 itself (env vars, TLS, systemd, verification) is the same everywhere and lives
 in [DEPLOY.md](DEPLOY.md) — follow that once your VM is up.
 
-> **AWS shortcut:** a ready-to-apply Terraform module lives in
-> [deploy/terraform/](deploy/terraform/) - ECS Fargate behind an internal ALB
-> with TLS, no VM to manage. Fill in a `.tfvars` and `terraform apply`. The rest
-> of this guide covers the manual VM path and the other clouds.
+> **AWS shortcut:** ready-to-apply Terraform lives in
+> [deploy/terraform/](deploy/terraform/), in two flavors behind an internal ALB
+> with TLS - **Fargate** (serverless) or **EC2** (managed VM, SSM access). Fill
+> in a `.tfvars` and `terraform apply`. The rest of this guide covers the manual
+> VM path and the other clouds.
 
 The shape is identical on all three clouds:
 

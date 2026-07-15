@@ -6,29 +6,27 @@ vpc_id             = "vpc-xxxxxxxx"
 service_subnet_ids = ["subnet-private-a", "subnet-private-b"] # Fargate tasks
 alb_subnet_ids     = ["subnet-private-a", "subnet-private-b"] # internal ALB
 
-# Build the image from this repo's Dockerfile and push to your own registry:
+# Build from the repo Dockerfile and push to your registry:
 #   docker build -t misp-mcp:1.2.0 .
 #   docker tag misp-mcp:1.2.0 <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
 #   docker push <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
 container_image = "<acct>.dkr.ecr.us-east-1.amazonaws.com/misp-mcp:1.2.0"
 
-# Your MISP instance (internal DNS or URL). Keep verify true in production.
 misp_url        = "https://misp.internal"
 misp_verify_tls = true
 
 # Leave empty for read-only. Set to enable the write tools.
 # misp_submission_event_id = "42"
 
-# ACM cert covering the hostname callers use.
 certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/xxxxxxxx"
 
-# Lock this down to your VPN / office / caller networks. Never 0.0.0.0/0.
+# Lock down to your VPN / office / caller networks. Never 0.0.0.0/0.
 allowed_cidrs = ["10.0.0.0/8"]
 
 internal_alb     = true
 assign_public_ip = false
 
-# Optional custom domain via Route 53.
+# Optional custom domain.
 # domain_name     = "misp-mcp.example.com"
 # route53_zone_id = "ZXXXXXXXXXXXXX"
 

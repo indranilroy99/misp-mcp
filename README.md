@@ -270,9 +270,10 @@ caller's own `X-MISP-Key`, which MISP validates and attributes to that user.
 - **Self-host** for a team (HTTP server behind TLS, EC2/VM + systemd):
   [DEPLOY.md](DEPLOY.md).
 - **Cloud, any provider** (AWS / GCP / Azure guidance): [CLOUD.md](CLOUD.md).
-- **AWS, one command** - a ready Terraform module (ECS Fargate + internal ALB +
-  TLS, no VM to manage): [deploy/terraform/](deploy/terraform/). Fill in a
-  `.tfvars`, `terraform apply`, and it prints the `/mcp` endpoint.
+- **AWS, Terraform** - ready modules behind an internal ALB with TLS, in two
+  flavors sharing one networking module: **Fargate** (serverless, no VM) or
+  **EC2** (managed VM, SSM access): [deploy/terraform/](deploy/terraform/). Fill
+  in a `.tfvars`, `terraform apply`, and it prints the `/mcp` endpoint.
 
 Automated local setup:
 

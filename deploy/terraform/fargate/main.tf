@@ -1,8 +1,8 @@
 locals {
   port = 8080
 
-  # Base environment. misp-mcp holds NO MISP key of its own; each caller sends
-  # their own key in the X-MISP-Key header, so there is no secret to store here.
+  # misp-mcp holds NO MISP key of its own; each caller sends their own key in
+  # the X-MISP-Key header. Nothing secret is stored here.
   base_env = [
     { name = "MCP_TRANSPORT", value = "http" },
     { name = "MCP_HOST", value = "0.0.0.0" },
@@ -20,29 +20,20 @@ locals {
   container_env = concat(local.base_env, local.submission_env)
 }
 
-# --- Networking: security groups -------------------------------------------
+module "net_lb" {
+  source = "../modules/net_lb"
 
-resource "aws_security_group" "alb" {
-  name        = "${var.name}-alb"
-  description = "Ingress to misp-mcp ALB on 443 from allowed CIDRs"
-  vpc_id      = var.vpc_id
-  tags        = var.tags
-
-  ingress {
-    description = "HTTPS from allowed caller networks"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_cidrs
-  }
-
-  egress {
-    description = "To the misp-mcp tasks"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  name            = var.name
+  vpc_id          = var.vpc_id
+  alb_subnet_ids  = var.alb_subnet_ids
+  allowed_cidrs   = var.allowed_cidrs
+  internal_alb    = var.internal_alb
+  certificate_arn = var.certificate_arn
+  port            = local.port
+  target_type     = "ip" # Fargate awsvpc tasks register by IP
+  domain_name     = var.domain_name
+  route53_zone_id = var.route53_zone_id
+  tags            = var.tags
 }
 
 resource "aws_security_group" "service" {
@@ -56,7 +47,7 @@ resource "aws_security_group" "service" {
     from_port       = local.port
     to_port         = local.port
     protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+    security_groups = [module.net_lb.alb_security_group_id]
   }
 
   egress {
@@ -68,59 +59,11 @@ resource "aws_security_group" "service" {
   }
 }
 
-# --- Load balancer ----------------------------------------------------------
-
-resource "aws_lb" "this" {
-  name               = var.name
-  internal           = var.internal_alb
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
-  subnets            = var.alb_subnet_ids
-  idle_timeout       = 300 # MCP streaming responses can be long-lived
-  tags               = var.tags
-}
-
-resource "aws_lb_target_group" "this" {
-  name        = var.name
-  port        = local.port
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
-  target_type = "ip" # Fargate awsvpc tasks register by IP
-  tags        = var.tags
-
-  health_check {
-    path                = "/healthz"
-    matcher             = "200"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 3
-  }
-}
-
-resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.this.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = var.certificate_arn
-  tags              = var.tags
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.this.arn
-  }
-}
-
-# --- Logging ----------------------------------------------------------------
-
 resource "aws_cloudwatch_log_group" "this" {
   name              = "/ecs/${var.name}"
   retention_in_days = var.log_retention_days
   tags              = var.tags
 }
-
-# --- IAM: task execution role (pull image, write logs) ----------------------
 
 data "aws_iam_policy_document" "assume" {
   statement {
@@ -142,8 +85,6 @@ resource "aws_iam_role_policy_attachment" "execution" {
   role       = aws_iam_role.execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
-
-# --- ECS: cluster, task, service --------------------------------------------
 
 resource "aws_ecs_cluster" "this" {
   name = var.name
@@ -193,25 +134,12 @@ resource "aws_ecs_service" "this" {
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.this.arn
+    target_group_arn = module.net_lb.target_group_arn
     container_name   = var.name
     container_port   = local.port
   }
 
-  depends_on = [aws_lb_listener.https]
-}
-
-# --- Optional Route 53 record -----------------------------------------------
-
-resource "aws_route53_record" "this" {
-  count   = var.domain_name != "" && var.route53_zone_id != "" ? 1 : 0
-  zone_id = var.route53_zone_id
-  name    = var.domain_name
-  type    = "A"
-
-  alias {
-    name                   = aws_lb.this.dns_name
-    zone_id                = aws_lb.this.zone_id
-    evaluate_target_health = true
-  }
+  # The target group must be associated with the ALB (via the listener, created
+  # inside net_lb) before the service can register into it.
+  depends_on = [module.net_lb]
 }
