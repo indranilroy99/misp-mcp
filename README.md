@@ -235,44 +235,44 @@ rejected (not routable, can't identify an external threat).
 - **Keys stay private.** No shared key on the server; the key rides in a header
   over TLS. Logs never contain keys or IOC values.
 
-## Architecture (hosted)
+## Architecture
+
+The shape is the same on any host: callers reach misp-mcp over HTTPS through a
+TLS-terminating load balancer (or the process's own cert), and misp-mcp calls
+your MISP. It holds no credential of its own - every request carries the
+caller's own `X-MISP-Key`, which MISP validates and attributes to that user.
 
 ```
-  MCP client  (Claude / Cursor / …, on your network / VPN)
+  MCP client  (any client, on an allowed network / VPN)
        │
        │  HTTPS  +  header  X-MISP-Key: <your key>
        ▼
-  Route 53   misp.example.com
-       │
+  Load balancer            TLS termination · ingress limited to allowed CIDRs
+       │  HTTP :8080  (private)
        ▼
-  Application Load Balancer     TLS termination · office/VPN CIDRs only
-       │
-       ├─ path /mcp*   ─────►  misp-mcp   (Docker container, :8080)  ─┐
-       │                                                              │  internal
-       └─ everything else ──►  MISP core  (Docker, :443)  ◄───────────┘  docker net,
-                                    │                        misp-mcp calls MISP
-                                    ▼                        with your key
-                                RDS (MySQL)
-
-        misp-mcp and MISP run as separate containers on the same EC2 host.
-        No shared key on the server - every request carries the caller's own
-        MISP key, which MISP validates and attributes to that user.
+  misp-mcp                 container / VM, no stored secret
+       │  HTTPS
+       ▼
+  your MISP instance
 ```
 
-- TLS terminates at the ALB; misp-mcp serves plain HTTP on `:8080` behind it.
-- The ALB routes only `/mcp*` to misp-mcp; all other paths still go to MISP, so
-  MISP is unaffected.
-- misp-mcp reaches MISP over the internal Docker network (no hairpin), and holds
-  no credentials of its own.
+- TLS terminates at the load balancer; misp-mcp serves plain HTTP on `:8080`
+  behind it (or give the process its own cert, see [DEPLOY.md](DEPLOY.md)).
+- Ingress is scoped to your caller networks; the endpoint is not public.
+- Two common topologies: run misp-mcp **standalone** in front of a separate
+  MISP (the Terraform module below), or **co-locate** it beside an existing
+  MISP behind one load balancer with a `/mcp*` path rule so MISP is untouched.
 
-## Run it yourself (local or self-host)
+## Host it (local, self-host, or cloud)
 
-Most people just use the hosted server above. To run your own:
-
-- **Local** (in your MCP client, your own MISP): install it and add the
+- **Local** (in your MCP client, against your own MISP): install and add the
   `misp-mcp` binary - see [ONBOARDING.md](ONBOARDING.md).
-- **Self-host** for a team (HTTP server behind TLS): [DEPLOY.md](DEPLOY.md).
-- **On a cloud** (AWS / GCP / Azure): [CLOUD.md](CLOUD.md).
+- **Self-host** for a team (HTTP server behind TLS, EC2/VM + systemd):
+  [DEPLOY.md](DEPLOY.md).
+- **Cloud, any provider** (AWS / GCP / Azure guidance): [CLOUD.md](CLOUD.md).
+- **AWS, one command** - a ready Terraform module (ECS Fargate + internal ALB +
+  TLS, no VM to manage): [deploy/terraform/](deploy/terraform/). Fill in a
+  `.tfvars`, `terraform apply`, and it prints the `/mcp` endpoint.
 
 Automated local setup:
 
