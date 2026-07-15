@@ -4,6 +4,19 @@ All notable changes to misp-mcp are documented here. This project follows
 [Semantic Versioning](https://semver.org/) and the format of
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] — 2026-07-15
+
+### Added
+- `misp_check_warninglist`: check indicators against MISP warninglists
+  (known-good / noise lists - public DNS, top sites, bogons). A match is a
+  strong false-positive signal; run it before submitting anything uncertain.
+- `misp_worker_status`: background worker / queue health (admin key).
+- `misp_jobs`: recent background jobs with status and error message, with an
+  only_failed filter (admin key).
+- Pagination on `misp_search_attributes` (`page` + `limit`, with `has_more`)
+  so large instances can be walked without truncation.
+- 21 tools total (19 read, 2 write). 65 tests.
+
 ## [1.3.1] — 2026-07-15
 
 ### Security

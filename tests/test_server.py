@@ -89,6 +89,8 @@ def test_tools_registered():
         "misp_lookup_galaxy", "misp_list_galaxies", "misp_list_taxonomies",
         "misp_get_taxonomy", "misp_search_tags", "misp_get_object",
         "misp_get_attribute", "misp_search_attributes",
+        # v1.4.0 false-positive control + ops
+        "misp_check_warninglist", "misp_worker_status", "misp_jobs",
     }, sorted(by)
     # All read tools are read-only; only the submit tools write. Nothing destructive.
     write_tools = {"misp_submit_ioc", "misp_submit_iocs"}
@@ -669,7 +671,7 @@ def test_search_attributes_requires_filter_and_presents_hits():
 
     c.search_attributes_query = saq
     out2 = json.loads(run(server.misp_search_attributes(server.AttributeSearchInput(type="ip-dst"))))
-    assert out2["total"] == 1
+    assert out2["count"] == 1 and out2["page"] == 1 and out2["has_more"] is False
     assert out2["hits"][0]["attribute_type"] == "ip-dst" and out2["hits"][0]["value"] == "1.2.3.4"
 
 
@@ -702,6 +704,72 @@ def test_submission_comment_injection_cannot_forge_submitter():
     # attributes added outside this server (arbitrary comment) parse to empty,
     # so the audit shows no forged submitter for UI-added entries
     assert server._parse_submission_comment("added via UI") == {}
+
+
+def test_check_warninglist_flags_known_good():
+    c = _fake_client()
+
+    async def cw(values):
+        # MISP returns a map of value -> matched warninglists (mixed shapes)
+        return {"8.8.8.8": [{"name": "List of known IPv4 public DNS resolvers"}],
+                "1.2.3.4": []}
+
+    c.check_warninglists = cw
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_check_warninglist(server.WarninglistInput(iocs=["8.8.8.8", "1.2.3.4"]))))
+    assert out["total"] == 2 and out["flagged"] == 1
+    hit = next(r for r in out["results"] if r["ioc"] == "8.8.8.8")
+    clean = next(r for r in out["results"] if r["ioc"] == "1.2.3.4")
+    assert hit["on_warninglist"] is True and "public DNS" in hit["lists"][0]
+    assert clean["on_warninglist"] is False and clean["lists"] == []
+
+
+def test_worker_status_summarizes_queues():
+    c = _fake_client()
+
+    async def workers():
+        return {"default": {"workers": 5, "jobCount": 0}, "email": {"workers": 0, "jobCount": 12}}
+
+    c.workers = workers
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_worker_status()))
+    assert out["raw_ok"] is True and len(out["queues"]) == 2
+    email = next(q for q in out["queues"] if q["queue"] == "email")
+    assert email["workers"] == 0 and email["jobs"] == 12
+
+
+def test_jobs_filters_failed_and_maps_status():
+    c = _fake_client()
+
+    async def jobs(limit=50):
+        return [
+            {"id": "1", "worker": "default", "status": "2", "progress": 100, "message": "ok"},
+            {"id": "2", "worker": "cache", "status": "3", "progress": 40, "message": "boom"},
+        ]
+
+    c.jobs = jobs
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_jobs(server.JobsInput())))
+    assert out["total"] == 2 and out["failed"] == 1
+    out2 = json.loads(run(server.misp_jobs(server.JobsInput(only_failed=True))))
+    assert out2["total"] == 1 and out2["jobs"][0]["status"] == "failed" and out2["jobs"][0]["message"] == "boom"
+
+
+def test_search_attributes_pagination_has_more():
+    c = _fake_client()
+    calls = {}
+
+    async def saq(**kw):
+        calls.update(kw)
+        # return exactly `limit` hits -> has_more should be true
+        return [{"event_id": "1", "type": "domain", "value": f"d{i}.com", "is_restricted": False}
+                for i in range(kw["limit"])]
+
+    c.search_attributes_query = saq
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_search_attributes(server.AttributeSearchInput(type="domain", limit=5, page=2))))
+    assert calls["page"] == 2 and calls["limit"] == 5
+    assert out["page"] == 2 and out["count"] == 5 and out["has_more"] is True
 
 
 def main():

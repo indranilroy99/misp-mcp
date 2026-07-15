@@ -276,12 +276,13 @@ class MispClient:
         self, *, attr_type: str | None = None, category: str | None = None,
         tag: str | None = None, to_ids: bool | None = None,
         event_id: str | None = None, since_days: int | None = None,
-        limit: int = 25,
+        limit: int = 25, page: int = 1,
     ) -> list[dict]:
         """Attribute restSearch by structured filters (type/category/tag/
         to_ids/event/recency) rather than by IOC value. Each hit annotated
-        with is_restricted from its parent event, same as search_attributes."""
-        body: dict = {"limit": limit}
+        with is_restricted from its parent event, same as search_attributes.
+        page (1-based) with limit gives stable pagination for big instances."""
+        body: dict = {"limit": limit, "page": max(1, int(page))}
         if attr_type:
             body["type"] = attr_type
         if category:
@@ -328,6 +329,35 @@ class MispClient:
         user = body.get("User") if isinstance(body.get("User"), dict) else {}
         org = body.get("Organisation") if isinstance(body.get("Organisation"), dict) else {}
         return {"email": user.get("email"), "org": org.get("name")}
+
+    # --- warninglists + operational health ---------------------------------
+
+    async def check_warninglists(self, values: list[str]) -> dict:
+        """POST /warninglists/checkValue: for each value, the warninglists it
+        matches (known-good / noise lists like public DNS, Alexa, bogons).
+        A non-empty match is a strong false-positive signal. Returns the raw
+        {value: [matches]} map (tolerant to list-or-dict match entries)."""
+        resp = await self._request(
+            "POST", "/warninglists/checkValue", json={"value": values}
+        )
+        body = resp.json()
+        return body if isinstance(body, dict) else {}
+
+    async def workers(self) -> dict:
+        """GET /servers/getWorkers: background worker/queue health. Requires an
+        admin key; a non-admin key gets 403 (surfaced as an actionable error)."""
+        resp = await self._request("GET", "/servers/getWorkers")
+        body = resp.json()
+        return body if isinstance(body, dict) else {}
+
+    async def jobs(self, limit: int = 50) -> list[dict]:
+        """GET /jobs/index: recent background jobs (fetch/enrichment/correlation)
+        with status and any error. Requires an admin key."""
+        resp = await self._request("GET", "/jobs/index")
+        payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        return [j.get("Job", j) for j in payload if isinstance(j, dict)][:limit]
 
     # --- write path (verified against MISP 2.5.x) --------------------------
     # Requires a write-capable key (MISP "User" role). A read-only key gets

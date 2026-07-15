@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.1-informational" alt="version 1.3.1">
+  <img src="https://img.shields.io/badge/version-1.4.0-informational" alt="version 1.4.0">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey" alt="license Apache-2.0">
   <img src="https://img.shields.io/badge/python-3.10%2B-informational" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-61%20passing-lightgrey" alt="61 tests passing">
+  <img src="https://img.shields.io/badge/tests-65%20passing-lightgrey" alt="65 tests passing">
 </p>
 
 ---
@@ -21,9 +21,9 @@
 misp-mcp connects MISP to any [MCP](https://modelcontextprotocol.io) client
 (Claude Desktop, Claude Code, Cursor, and others). You ask in plain language,
 the client calls MISP, you get the answer. No MISP UI, no REST calls by hand.
-Sixteen tools read from MISP - indicators, events, feeds, plus the galaxy /
-taxonomy / tag knowledge base - and two add indicators (single + bulk), all
-under your own MISP key.
+Nineteen tools read from MISP - indicators, events, feeds, the galaxy /
+taxonomy / tag knowledge base, warninglist checks, and worker/job health - and
+two add indicators (single + bulk), all under your own MISP key.
 
 ---
 
@@ -222,7 +222,10 @@ lookup:
 | `misp_search_tags` | read | Find tag definitions by name |
 | `misp_get_object` | read | One MISP object (grouped attributes, e.g. a file object) |
 | `misp_get_attribute` | read | One attribute by id, with its event |
-| `misp_search_attributes` | read | Search attributes by type, category, tag, to_ids, or event |
+| `misp_search_attributes` | read | Search attributes by type, category, tag, to_ids, or event (paginated) |
+| `misp_check_warninglist` | read | Flag IOCs that hit known-good / noise lists (false-positive control) |
+| `misp_worker_status` | read | Background worker / queue health (admin key) |
+| `misp_jobs` | read | Recent background jobs + failures and why (admin key) |
 | `misp_submit_ioc` | **write** | Add a new indicator (needs a write-capable key) |
 | `misp_submit_iocs` | **write** | Bulk: validate + add many indicators (dry-run preview first) |
 
@@ -329,12 +332,12 @@ cd misp-mcp
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest tests/ -q            # 61 tests
+.venv/bin/python -m pytest tests/ -q            # 65 tests
 ```
 
 ```
 misp_mcp/
-  server.py      the 18 tools and the MCP server
+  server.py      the 21 tools and the MCP server
   client.py      talks to the MISP REST API (read + write)
   config.py      reads settings from the environment
   http_app.py    hosted mode: header auth + web server

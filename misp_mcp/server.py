@@ -1376,7 +1376,8 @@ class AttributeSearchInput(BaseModel):
     days: int | None = Field(
         default=None, ge=1, le=365, description="Only attributes changed in the last N days.",
     )
-    limit: int = Field(default=25, ge=1, le=MAX_RESULTS, description="Maximum results.")
+    limit: int = Field(default=25, ge=1, le=MAX_RESULTS, description="Maximum results per page.")
+    page: int = Field(default=1, ge=1, le=10000, description="1-based page number for paging through large result sets.")
 
 
 @mcp.tool(
@@ -1393,10 +1394,13 @@ async def misp_search_attributes(params: AttributeSearchInput) -> str:
     sha256 flagged for detection in the last 7 days" or "every domain in
     event 16989". At least one filter is required to keep responses bounded.
 
-    Returns JSON: {"total", "hits": [{"event_id", "event_info",
-    "threat_level", "source_org", "attribute_type", "value", "category",
-    "to_ids", "restricted", ...}]}. Restricted hits are redacted unless
-    opted in.
+    Paginated: pass page=2, 3, ... to walk large result sets; "has_more" is
+    true when the page came back full (there is likely a next page).
+
+    Returns JSON: {"page", "count", "has_more", "hits": [{"event_id",
+    "event_info", "threat_level", "source_org", "attribute_type", "value",
+    "category", "to_ids", "restricted", ...}]}. Restricted hits are redacted
+    unless opted in.
     """
     if not any([params.type, params.category, params.tag, params.to_ids is not None,
                 params.event_id, params.days]):
@@ -1405,12 +1409,161 @@ async def misp_search_attributes(params: AttributeSearchInput) -> str:
         hits = await _get_client().search_attributes_query(
             attr_type=params.type, category=params.category, tag=params.tag,
             to_ids=params.to_ids, event_id=params.event_id, since_days=params.days,
-            limit=params.limit,
+            limit=params.limit, page=params.page,
         )
     except Exception as e:
         return _error(e)
     return json.dumps(
-        {"total": len(hits), "hits": [_present_hit(h) for h in hits]},
+        {"page": params.page, "count": len(hits), "has_more": len(hits) == params.limit,
+         "hits": [_present_hit(h) for h in hits]},
+        indent=2,
+    )
+
+
+# ---------------------------------------------------------------------------
+# False-positive control + operational health (v1.4.0).
+# ---------------------------------------------------------------------------
+
+
+class WarninglistInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    iocs: list[str] = Field(
+        ..., min_length=1, max_length=50,
+        description="Indicators to check against MISP warninglists (known-good / "
+        "noise lists: public DNS, top-sites, bogons, ...). Defanged forms accepted.",
+    )
+
+
+@mcp.tool(
+    name="misp_check_warninglist",
+    annotations={
+        "title": "Check IOCs against MISP warninglists (known-good / noise)",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_check_warninglist(params: WarninglistInput) -> str:
+    """Check indicators against MISP warninglists - curated known-good / noise
+    lists (public DNS resolvers, top-visited domains, bogon ranges, ...). A
+    match is a strong false-positive signal: think twice before flagging or
+    submitting it. Run this before misp_submit_ioc on anything uncertain.
+
+    Returns JSON: {"total", "flagged", "results": [{"ioc", "on_warninglist",
+    "lists": [str]}]}. on_warninglist=true means the IOC appears on at least
+    one warninglist (likely benign / noisy).
+    """
+    normalized = [normalize_ioc(x) for x in params.iocs]
+    try:
+        raw = await _get_client().check_warninglists(normalized)
+    except Exception as e:
+        return _error(e)
+
+    def _names(matches) -> list[str]:
+        out = []
+        for m in matches or []:
+            if isinstance(m, dict):
+                out.append(m.get("name") or m.get("id"))
+            else:
+                out.append(m)
+        return [str(n) for n in out if n]
+
+    results = []
+    for ioc in normalized:
+        lists = _names(raw.get(ioc))
+        results.append({"ioc": ioc, "on_warninglist": bool(lists), "lists": lists})
+    return json.dumps(
+        {"total": len(results),
+         "flagged": sum(1 for r in results if r["on_warninglist"]),
+         "results": results},
+        indent=2,
+    )
+
+
+@mcp.tool(
+    name="misp_worker_status",
+    annotations={
+        "title": "MISP background worker / queue health",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_worker_status() -> str:
+    """Report MISP's background worker health - the queues that run feed
+    fetches, enrichment, correlation, and email. Needs an admin-capable key;
+    a non-admin key gets a clear permission error.
+
+    Returns JSON: {"queues": [{"queue", "workers", "jobs"}], "raw_ok": bool}
+    summarizing each worker queue and whether any are dead/backed up.
+    """
+    try:
+        data = await _get_client().workers()
+    except Exception as e:
+        return _error(e)
+    queues = []
+    for name, info in (data.items() if isinstance(data, dict) else []):
+        if isinstance(info, dict):
+            queues.append({
+                "queue": name,
+                "workers": info.get("workers"),
+                "jobs": info.get("jobCount") or info.get("jobs"),
+            })
+    return json.dumps({"queues": queues, "raw_ok": bool(queues)}, indent=2)
+
+
+class JobsInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    limit: int = Field(default=25, ge=1, le=200, description="Max jobs to return.")
+    only_failed: bool = Field(
+        default=False, description="Only jobs that did not complete cleanly - the ones worth investigating.",
+    )
+
+
+@mcp.tool(
+    name="misp_jobs",
+    annotations={
+        "title": "Recent MISP background jobs (and failures)",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_jobs(params: JobsInput) -> str:
+    """List recent MISP background jobs (feed fetch, enrichment, correlation)
+    with status and any error message - use it to see what is failing and why.
+    Needs an admin-capable key.
+
+    Returns JSON: {"total", "failed", "jobs": [{"id", "worker", "status",
+    "message", "progress", "org"}]}, newest first. only_failed narrows to jobs
+    that did not finish cleanly.
+    """
+    try:
+        jobs = await _get_client().jobs(limit=max(params.limit * 3, params.limit))
+    except Exception as e:
+        return _error(e)
+
+    def _status(j: dict) -> str:
+        # MISP status: 0 queued, 1 running, 2 done, 3 failed (varies by version).
+        s = j.get("status")
+        return {"0": "queued", "1": "running", "2": "done", "3": "failed"}.get(str(s), str(s))
+
+    rows = []
+    for j in jobs:
+        status = _status(j)
+        failed = status == "failed" or (j.get("progress") not in (100, "100") and status == "done")
+        if params.only_failed and status != "failed":
+            continue
+        rows.append({
+            "id": j.get("id"),
+            "worker": j.get("worker"),
+            "status": status,
+            "message": j.get("message"),
+            "progress": j.get("progress"),
+            "org": (j.get("org") or j.get("org_id")),
+        })
+    rows = rows[: params.limit]
+    return json.dumps(
+        {"total": len(rows),
+         "failed": sum(1 for r in rows if r["status"] == "failed"),
+         "jobs": rows},
         indent=2,
     )
 
