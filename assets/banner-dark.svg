@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="MISP MCP - Malware Information Sharing Platform">
+  <defs>
+    <pattern id="mosd" width="46" height="26" patternUnits="userSpaceOnUse"><text x="0" y="20" font-size="22" font-family="monospace" fill="#EDEDED">0110</text></pattern>
+    <mask id="mkd">
+      <rect x="330" y="120" width="190" height="150" rx="26" fill="#ffffff"/>
+      <rect x="90" y="50" width="300" height="170" rx="30" fill="#ffffff"/>
+      <polygon points="150,214 240,214 165,278" fill="#ffffff"/>
+      <path d="M90 80 a30 30 0 0 1 30 -30 h240 a30 30 0 0 1 30 30 v110 a30 30 0 0 1 -30 30 h-120 l-45 58 v-58 h-75 a30 30 0 0 1 -30 -30 z" fill="none" stroke="#000000" stroke-width="8"/>
+      <circle cx="165" cy="132" r="18" fill="#000000"/>
+      <circle cx="240" cy="132" r="18" fill="#000000"/>
+      <circle cx="315" cy="132" r="18" fill="#000000"/>
+    </mask>
+  </defs>
+  <rect x="1" y="1" width="1198" height="358" rx="20" fill="#0A0A0A"/>
+  <rect x="80" y="40" width="450" height="250" fill="url(#mosd)" mask="url(#mkd)"/>
+  <text x="576" y="150" font-size="30" font-family="monospace" fill="#7A7A7A">$ misp-mcp --version</text>
+  <text x="576" y="212" font-size="60" font-weight="700" font-family="monospace" fill="#EDEDED" letter-spacing="2">MISP·MCP</text>
+  <rect x="576" y="236" width="16" height="26" fill="#EDEDED"/>
+  <text x="606" y="257" font-size="20" font-family="monospace" fill="#7A7A7A">Malware Information Sharing Platform</text>
+</svg>
