@@ -25,8 +25,9 @@ variable "alb_subnet_ids" {
 }
 
 variable "container_image" {
-  description = "Full image reference the instance pulls and runs, e.g. <account>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0."
+  description = "Full image reference the instance pulls and runs. Defaults to the published GHCR image; override with your own registry (e.g. an ECR mirror) if you prefer."
   type        = string
+  default     = "ghcr.io/indranilroy99/misp-mcp:latest"
 }
 
 variable "instance_type" {

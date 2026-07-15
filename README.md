@@ -274,6 +274,17 @@ caller's own `X-MISP-Key`, which MISP validates and attributes to that user.
 
 ## Host it (local, self-host, or cloud)
 
+- **Docker** (fastest): run the published image against your own MISP.
+  ```bash
+  docker run -d -p 127.0.0.1:8080:8080 \
+    -e MCP_TRANSPORT=http -e MCP_HOST=0.0.0.0 \
+    -e MISP_URL=https://misp.example.com \
+    -e MISP_MCP_ALLOW_INSECURE_BIND=true \
+    ghcr.io/indranilroy99/misp-mcp:latest
+  # or: MISP_URL=https://misp.example.com docker compose up -d
+  ```
+  Bind stays on localhost; front it with your own TLS proxy for remote use (the
+  key is a bearer credential).
 - **Local** (in your MCP client, against your own MISP): install and add the
   `misp-mcp` binary - see [ONBOARDING.md](ONBOARDING.md).
 - **Self-host** for a team (HTTP server behind TLS, EC2/VM + systemd):
@@ -284,7 +295,7 @@ caller's own `X-MISP-Key`, which MISP validates and attributes to that user.
   **EC2** (managed VM, SSM access): [deploy/terraform/](deploy/terraform/). Fill
   in a `.tfvars`, `terraform apply`, and it prints the `/mcp` endpoint.
 
-Automated local setup:
+Automated local setup (from source):
 
 ```bash
 git clone https://github.com/indranilroy99/misp-mcp.git

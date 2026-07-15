@@ -25,8 +25,9 @@ variable "alb_subnet_ids" {
 }
 
 variable "container_image" {
-  description = "Full image reference, e.g. <account>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0. Build from the repo Dockerfile and push to your own registry first."
+  description = "Full image reference. Defaults to the published GHCR image; override with your own registry (e.g. an ECR mirror) if you prefer."
   type        = string
+  default     = "ghcr.io/indranilroy99/misp-mcp:latest"
 }
 
 variable "misp_url" {

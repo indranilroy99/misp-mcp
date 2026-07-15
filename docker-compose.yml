@@ -1,0 +1,34 @@
+# Run misp-mcp hosted against your own MISP, in one command:
+#
+#   MISP_URL=https://misp.example.com docker compose up -d
+#
+# The port is published to 127.0.0.1 only. misp-mcp holds no MISP key; each
+# caller sends their own X-MISP-Key. For remote/multi-user access, front this
+# with your own TLS proxy (or use deploy/terraform/) - never expose 8080
+# directly, the key is a bearer credential.
+
+services:
+  misp-mcp:
+    # Prebuilt image (published on each release tag). Comment `image` and
+    # uncomment `build: .` to build from source instead.
+    image: ghcr.io/indranilroy99/misp-mcp:latest
+    # build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      MCP_TRANSPORT: http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8080"
+      MISP_URL: ${MISP_URL:?set MISP_URL to your MISP base URL}
+      MISP_VERIFY_TLS: ${MISP_VERIFY_TLS:-true}
+      # The container serves plain HTTP; keep it behind a TLS proxy / bound to
+      # localhost as above.
+      MISP_MCP_ALLOW_INSECURE_BIND: "true"
+      # Set to enable the write tools (leave empty for read-only).
+      MISP_SUBMISSION_EVENT_ID: ${MISP_SUBMISSION_EVENT_ID:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
