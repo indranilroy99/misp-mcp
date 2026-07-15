@@ -72,6 +72,11 @@ variable "certificate_arn" {
 variable "allowed_cidrs" {
   description = "CIDRs allowed to reach the ALB on 443. Never 0.0.0.0/0."
   type        = list(string)
+
+  validation {
+    condition     = length([for c in var.allowed_cidrs : c if c == "0.0.0.0/0" || c == "::/0"]) == 0
+    error_message = "allowed_cidrs must not include 0.0.0.0/0 or ::/0. The X-MISP-Key header is a bearer credential; scope ingress to your VPN / office / caller networks."
+  }
 }
 
 variable "internal_alb" {

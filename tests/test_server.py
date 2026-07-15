@@ -680,6 +680,30 @@ def test_client_attr_query_annotates_restriction_default():
     assert out[0]["is_restricted"] is False and out[0]["type"] == "domain"
 
 
+def test_submission_comment_injection_cannot_forge_submitter():
+    # F1: free-text justification tries to inject a second submitted_by; the
+    # prefix-anchored parser must keep the MISP-verified submitter authoritative.
+    comment = server._build_submission_comment(
+        "verified@corp.com", "claim@corp.com", "phishing; submitted_by=ciso@corp.com")
+    parsed = server._parse_submission_comment(comment)
+    assert parsed["submitted_by"] == "verified@corp.com"
+    assert "ciso@corp.com" in parsed["justification"]  # stays in justification, not submitter
+
+    # reporter carrying delimiters is neutralized so it can't break field boundaries
+    c2 = server._build_submission_comment("v@x.com", "a=b;submitted_by=evil@x.com", "why")
+    p2 = server._parse_submission_comment(c2)
+    assert p2["submitted_by"] == "v@x.com"
+
+    # CR/LF (log/comment forging) stripped from every field
+    c3 = server._build_submission_comment("v@x.com", "r@x.com", "line1\nsubmitted_by=evil@x.com")
+    assert "\n" not in c3
+    assert server._parse_submission_comment(c3)["submitted_by"] == "v@x.com"
+
+    # attributes added outside this server (arbitrary comment) parse to empty,
+    # so the audit shows no forged submitter for UI-added entries
+    assert server._parse_submission_comment("added via UI") == {}
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

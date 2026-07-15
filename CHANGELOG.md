@@ -4,6 +4,26 @@ All notable changes to misp-mcp are documented here. This project follows
 [Semantic Versioning](https://semver.org/) and the format of
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.1] — 2026-07-15
+
+### Security
+- Fix submitter-attribution forgery in `misp_review_submissions` (comment
+  injection). The audit comment is now built and parsed with a prefix-anchored
+  format so free text in `justification`/`reporter` can no longer inject a
+  second `submitted_by=` that overrides the MISP-verified submitter. Control
+  characters are stripped from all fields; structured fields have `;`/`=`
+  neutralized. Applies to `misp_submit_ioc` and `misp_submit_iocs`.
+
+### Changed
+- CI: least-privilege `permissions: contents: read`, added a `pip-audit`
+  dependency-vulnerability job, added CodeQL (`security-extended`) SAST, and
+  Dependabot for pip + GitHub Actions.
+- Terraform: `allowed_cidrs` now rejects `0.0.0.0/0` and `::/0` via a variable
+  validation, so the bearer-credential endpoint can't be opened to the
+  internet by a careless `.tfvars` (fargate and ec2 roots).
+- Documented that the per-key submit rate limit is per-process (run one replica
+  or use a shared store for a hard org-wide cap).
+
 ## [1.3.0] — 2026-07-15
 
 ### Added

@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import sys
 import time
 from collections import OrderedDict
@@ -124,7 +125,14 @@ _submit_times: dict[str, list[float]] = {}
 
 
 def _submit_rate_ok(key_id: str) -> bool:
-    """Sliding 60s window. Bounds a runaway or prompt-injected submit loop."""
+    """Sliding 60s window. Bounds a runaway or prompt-injected submit loop.
+
+    Scope note: this counter is per-process (in-memory). With more than one
+    task/replica behind the load balancer the effective cap is per-task, not
+    global. For a hard org-wide cap run a single replica, or back this with a
+    shared store (e.g. Redis). The MISP-side attribution and safelist still
+    apply on every replica regardless.
+    """
     now = time.monotonic()
     window = [t for t in _submit_times.get(key_id, []) if now - t < 60]
     if len(window) >= submit_rate_per_min():
@@ -615,15 +623,50 @@ async def misp_instance_status() -> str:
     )
 
 
+# Prefix-anchored parse of the exact comment _build_submission_comment writes.
+# Anchoring matters for integrity: submitted_by is captured non-greedily BEFORE
+# reporter_claimed and justification, so free text in the later fields cannot
+# inject a second "submitted_by=" that overrides the MISP-verified identity
+# (a last-wins key/value split would let it). justification is the remainder,
+# so it may safely contain ; and =.
+_SUBMISSION_RE = re.compile(
+    r"submitted_by=(?P<submitted_by>.*?); "
+    r"reporter_claimed=(?P<reporter_claimed>.*?); "
+    r"justification=(?P<justification>.*)\Z",
+    re.S,
+)
+
+
+def _clean_field(value: str, strip_delims: bool = False) -> str:
+    """Drop control chars (CR/LF) so a field can't forge a log or comment line.
+    strip_delims also neutralizes the ; and = separators, used for the
+    structured fields (submitted_by, reporter_claimed) whose boundaries must
+    stay intact; justification keeps them (it is parsed as the remainder)."""
+    cleaned = "".join(c for c in (value or "") if c.isprintable())
+    if strip_delims:
+        cleaned = cleaned.replace(";", ",").replace("=", ":")
+    return cleaned.strip()
+
+
+def _build_submission_comment(submitted_by: str, reporter: str, justification: str) -> str:
+    """The audit comment stamped on every submitted attribute. submitted_by
+    (MISP-verified) and reporter (claim) are delimiter-stripped so they cannot
+    break the field structure; justification keeps its text (parsed last)."""
+    return (
+        f"submitted_by={_clean_field(submitted_by, strip_delims=True)}; "
+        f"reporter_claimed={_clean_field(reporter, strip_delims=True)}; "
+        f"justification={_clean_field(justification)}"
+    )
+
+
 def _parse_submission_comment(comment: str) -> dict:
     """Pull submitted_by/reporter_claimed/justification out of the comment
-    misp_submit_ioc writes (`k=v; k=v`). Empty for attributes added elsewhere."""
-    fields: dict = {}
-    for part in (comment or "").split(";"):
-        if "=" in part:
-            key, value = part.split("=", 1)
-            fields[key.strip()] = value.strip()
-    return fields
+    _build_submission_comment writes. Empty for attributes added elsewhere
+    (e.g. directly in the MISP UI), which correctly show no parsed submitter."""
+    m = _SUBMISSION_RE.match(comment or "")
+    if not m:
+        return {}
+    return {k: v.strip() for k, v in m.groupdict().items()}
 
 
 def _epoch_to_iso(ts) -> str | None:
@@ -820,10 +863,7 @@ async def misp_submit_ioc(params: SubmitIocInput) -> str:
     who = await client.whoami()
     submitted_by = (who or {}).get("email") or "unverified"
     submitter_org = (who or {}).get("org")
-    comment = (
-        f"submitted_by={submitted_by}; reporter_claimed={params.reporter}; "
-        f"justification={params.justification}"
-    )
+    comment = _build_submission_comment(submitted_by, params.reporter, params.justification)
 
     try:
         attr = await client.add_attribute(
@@ -949,10 +989,7 @@ async def misp_submit_iocs(params: SubmitIocsInput) -> str:
         client = _get_client()
         who = await client.whoami()
         submitted_by = (who or {}).get("email") or "unverified"
-        comment = (
-            f"submitted_by={submitted_by}; reporter_claimed={params.reporter}; "
-            f"justification={params.justification}"
-        )
+        comment = _build_submission_comment(submitted_by, params.reporter, params.justification)
         key_id = _key_id(client)
         for ioc, ioc_type in to_add:
             if not _submit_rate_ok(key_id):

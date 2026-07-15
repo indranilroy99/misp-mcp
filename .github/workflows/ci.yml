@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# Least privilege: the default GITHUB_TOKEN scope is often read/write; this
+# workflow only needs to read the repo.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -19,3 +24,15 @@ jobs:
         run: pip install -e '.[dev]'
       - name: Test
         run: pytest -q
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e . pip-audit
+      - name: Dependency vulnerability audit
+        run: pip-audit --strict --desc

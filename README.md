@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.0-informational" alt="version 1.3.0">
+  <img src="https://img.shields.io/badge/version-1.3.1-informational" alt="version 1.3.1">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey" alt="license Apache-2.0">
   <img src="https://img.shields.io/badge/python-3.10%2B-informational" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-60%20passing-lightgrey" alt="60 tests passing">
+  <img src="https://img.shields.io/badge/tests-61%20passing-lightgrey" alt="61 tests passing">
 </p>
 
 ---
@@ -318,7 +318,7 @@ cd misp-mcp
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest tests/ -q            # 60 tests
+.venv/bin/python -m pytest tests/ -q            # 61 tests
 ```
 
 ```
