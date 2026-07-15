@@ -43,16 +43,18 @@ Keep the key private - every query runs *as you*.
 
 ### 2. Connect your MCP client
 
-**Claude Code** (one command in a terminal):
+This is a standard remote MCP server over streamable HTTP, so any MCP-capable
+client works - Claude Desktop, Claude Code, Cursor, Windsurf, Cline, Continue,
+Zed, VS Code (Copilot/MCP), Goose, and others. Whatever the client, it needs the
+same three things:
 
-```bash
-claude mcp add --transport http misp https://misp.example.com/mcp \
-  --scope user \
-  --header "X-MISP-Key: YOUR_KEY_HERE" \
-  --header "X-MISP-User: you@example.com"
-```
+1. Transport: **HTTP** (streamable HTTP / remote MCP)
+2. URL: `https://misp.example.com/mcp`
+3. Two headers: `X-MISP-Key: YOUR_KEY_HERE` and `X-MISP-User: you@example.com`
 
-**Claude Desktop / Cursor** (add to the client's MCP JSON config, then restart it):
+**Generic config** - most clients read a JSON block like this (the key names
+vary slightly by client - `mcpServers`, `servers`, or `mcp.servers`; check your
+client's docs, the values are identical):
 
 ```json
 {
@@ -69,18 +71,61 @@ claude mcp add --transport http misp https://misp.example.com/mcp \
 }
 ```
 
-### 3. Check it works
+<details>
+<summary><b>Per-client examples</b></summary>
+
+**Claude Code** (one command in a terminal):
 
 ```bash
-claude mcp list          # should show:  misp ... ✓ Connected
+claude mcp add --transport http misp https://misp.example.com/mcp \
+  --scope user \
+  --header "X-MISP-Key: YOUR_KEY_HERE" \
+  --header "X-MISP-User: you@example.com"
 ```
 
-Optional reachability check (should print `401` - proves you can reach it and
-that auth is required):
+**Claude Desktop / Cursor / Windsurf** - add the generic `mcpServers` block
+above to the client's MCP JSON config, then fully restart the app.
+
+**VS Code (Copilot MCP)** - in `.vscode/mcp.json` or user settings, under
+`"servers"`:
+
+```json
+{
+  "servers": {
+    "misp": {
+      "type": "http",
+      "url": "https://misp.example.com/mcp",
+      "headers": {
+        "X-MISP-Key": "YOUR_KEY_HERE",
+        "X-MISP-User": "you@example.com"
+      }
+    }
+  }
+}
+```
+
+**Cline / Continue / Zed / Goose and other clients** - use the same URL,
+`http` transport, and the two headers, in whatever config format the client
+uses. Anything that speaks remote MCP over HTTP and can send custom headers
+will work; the two `X-MISP-*` headers are the only server-specific part.
+
+Any client that cannot send custom HTTP headers is not supported (the key must
+ride in `X-MISP-Key`).
+
+</details>
+
+### 3. Check it works
+
+Reachability check (client-agnostic) - should print `401`, which proves you can
+reach the endpoint and that auth is required:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://misp.example.com/mcp
 ```
+
+If your client has a way to list MCP servers, confirm `misp` shows connected
+(Claude Code: `claude mcp list` → `misp ... ✓ Connected`; other clients show it
+in their MCP/tools panel).
 
 Then ask your assistant these - if they answer from MISP, you're set:
 
@@ -98,11 +143,18 @@ Then ask your assistant these - if they answer from MISP, you're set:
 
 ### Reconnect / restart it
 
-If it stops responding, shows the wrong tools, or was updated on the server,
-re-register it and fully restart your client (a `/mcp` reconnect or a new chat
-in the *same* running app is often not enough - the tool list is cached):
+MCP clients cache the tool list when they connect. If the server stops
+responding, shows the wrong tools, or was updated, the fix in every client is
+the same: **fully quit and reopen the app** (not just the conversation or
+window - an in-app `/mcp` reconnect or a new chat is often not enough). If tools
+are still stale, remove the `misp` server from the config, save, reopen, add it
+back, and reopen again.
 
-**Claude Code:**
+New tools added on the server only appear after this full restart.
+
+<details>
+<summary><b>Claude Code re-register</b></summary>
+
 ```bash
 claude mcp remove misp
 claude mcp add --transport http misp https://misp.example.com/mcp \
@@ -110,15 +162,10 @@ claude mcp add --transport http misp https://misp.example.com/mcp \
   --header "X-MISP-Key: YOUR_KEY_HERE" \
   --header "X-MISP-User: you@example.com"
 ```
-Then **quit Claude Code completely** (not just the conversation) and reopen it.
-Check with `claude mcp list` → `misp ... ✓ Connected`, and `/mcp` shows the
-current tools.
+Then quit Claude Code completely and reopen it. Check with `claude mcp list` →
+`misp ... ✓ Connected`, and `/mcp` shows the current tools.
 
-**Claude Desktop / Cursor:** fully **quit and reopen the app** (not just the
-window). If tools are still stale, remove the `misp` block from the config, save,
-reopen, then add it back and reopen again.
-
-New tools added on the server only appear after this full restart.
+</details>
 
 ---
 
