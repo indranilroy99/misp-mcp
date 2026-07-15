@@ -998,6 +998,386 @@ async def misp_submit_iocs(params: SubmitIocsInput) -> str:
     }, indent=2)
 
 
+# ---------------------------------------------------------------------------
+# Knowledge base + direct access (v1.3.0). Read breadth to match a full MISP
+# client: galaxies (threat actors / malware / ATT&CK), taxonomies (TLP,
+# kill-chain, PAP), tags, and direct object / attribute lookup and search.
+# All read-only, all under the caller's own key and the same TLP redaction.
+# ---------------------------------------------------------------------------
+
+
+class GalaxyLookupInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    query: str = Field(
+        ..., min_length=2, max_length=200,
+        description="Name, synonym, or value to match, e.g. 'APT29', 'Cobalt "
+        "Strike', 'T1059', 'Lazarus'.",
+    )
+    limit: int = Field(default=20, ge=1, le=MAX_RESULTS, description="Maximum clusters to return.")
+
+
+def _present_cluster(gc: dict) -> dict:
+    meta = gc.get("meta") if isinstance(gc.get("meta"), dict) else {}
+    return {
+        "name": gc.get("value"),
+        "type": gc.get("type"),
+        "tag": gc.get("tag_name"),
+        "uuid": gc.get("uuid"),
+        "synonyms": meta.get("synonyms"),
+        "source": gc.get("source"),
+        "description": gc.get("description"),
+    }
+
+
+@mcp.tool(
+    name="misp_lookup_galaxy",
+    annotations={
+        "title": "Look up a threat actor, malware, or technique (galaxy)",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_lookup_galaxy(params: GalaxyLookupInput) -> str:
+    """Search MISP galaxy clusters - the curated knowledge base of threat
+    actors, malware families, tools, and ATT&CK techniques - by name or
+    synonym. Use it for attribution ("who is APT29"), to resolve a malware
+    family, or to map a technique id.
+
+    Returns JSON: {"query", "total", "clusters": [{"name", "type", "tag",
+    "uuid", "synonyms", "source", "description"}]}. "tag" is the
+    misp-galaxy tag you can filter events by.
+    """
+    try:
+        clusters = await _get_client().search_galaxy_clusters(params.query, limit=params.limit)
+    except Exception as e:
+        return _error(e)
+    return json.dumps(
+        {"query": params.query, "total": len(clusters),
+         "clusters": [_present_cluster(c) for c in clusters]},
+        indent=2,
+    )
+
+
+@mcp.tool(
+    name="misp_list_galaxies",
+    annotations={
+        "title": "List galaxy types available in MISP",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_list_galaxies() -> str:
+    """List the galaxy types on this instance (Threat Actor, Ransomware,
+    ATT&CK, Tools, ...). Use it to see what knowledge bases exist before
+    searching one with misp_lookup_galaxy.
+
+    Returns JSON: {"total", "galaxies": [{"id", "name", "type",
+    "description"}]}.
+    """
+    try:
+        galaxies = await _get_client().galaxies()
+    except Exception as e:
+        return _error(e)
+    return json.dumps(
+        {"total": len(galaxies),
+         "galaxies": [
+             {"id": g.get("id"), "name": g.get("name"),
+              "type": g.get("type"), "description": g.get("description")}
+             for g in galaxies
+         ]},
+        indent=2,
+    )
+
+
+@mcp.tool(
+    name="misp_list_taxonomies",
+    annotations={
+        "title": "List MISP taxonomies (TLP, kill-chain, PAP, ...)",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_list_taxonomies() -> str:
+    """List the taxonomies on this instance and whether each is enabled -
+    the controlled vocabularies (TLP, kill-chain, PAP, ...) that back tags.
+
+    Returns JSON: {"total", "enabled", "taxonomies": [{"namespace",
+    "description", "enabled", "total_tags", "current_tags"}]}.
+    """
+    try:
+        taxonomies = await _get_client().taxonomies()
+    except Exception as e:
+        return _error(e)
+    rows = []
+    for item in taxonomies:
+        tax = item.get("Taxonomy", item) if isinstance(item, dict) else {}
+        rows.append({
+            "namespace": tax.get("namespace"),
+            "description": tax.get("description"),
+            "enabled": bool(tax.get("enabled")),
+            "total_tags": item.get("total_count"),
+            "current_tags": item.get("current_count"),
+        })
+    return json.dumps(
+        {"total": len(rows),
+         "enabled": sum(1 for r in rows if r["enabled"]),
+         "taxonomies": rows},
+        indent=2,
+    )
+
+
+class TaxonomyInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    taxonomy: str = Field(
+        ..., min_length=1, max_length=100,
+        description="Taxonomy namespace (e.g. 'tlp', 'kill-chain') or its numeric id.",
+    )
+    limit: int = Field(default=100, ge=1, le=500, description="Max entries to return.")
+
+
+@mcp.tool(
+    name="misp_get_taxonomy",
+    annotations={
+        "title": "Get one taxonomy's tags/predicates",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_get_taxonomy(params: TaxonomyInput) -> str:
+    """Fetch one taxonomy's entries - the concrete tags it defines (e.g. for
+    'tlp': tlp:clear, tlp:green, tlp:amber, tlp:red) with their meanings.
+    Accepts the namespace or the numeric id.
+
+    Returns JSON: {"namespace", "description", "total", "entries": [{"tag",
+    "expanded", "description"}]}.
+    """
+    client = _get_client()
+    tax_id = params.taxonomy
+    try:
+        if not tax_id.isdigit():
+            # Resolve namespace -> id from the taxonomy list.
+            listing = await client.taxonomies()
+            match = next(
+                (i for i in listing
+                 if (i.get("Taxonomy", {}) or {}).get("namespace", "").lower() == tax_id.lower()),
+                None,
+            )
+            if match is None:
+                return f"Error: no taxonomy with namespace '{tax_id}'. Try misp_list_taxonomies."
+            tax_id = str((match.get("Taxonomy", {}) or {}).get("id"))
+        body = await client.taxonomy(tax_id)
+    except Exception as e:
+        return _error(e)
+    if body is None:
+        return f"Error: taxonomy '{params.taxonomy}' not found or not accessible."
+    tax = body.get("Taxonomy", {}) if isinstance(body, dict) else {}
+    entries = body.get("entries") or body.get("Taxonomy", {}).get("entries") or []
+    rows = [
+        {"tag": e.get("tag"), "expanded": e.get("expanded"), "description": e.get("description")}
+        for e in entries[: params.limit] if isinstance(e, dict)
+    ]
+    return json.dumps(
+        {"namespace": tax.get("namespace"), "description": tax.get("description"),
+         "total": len(rows), "entries": rows},
+        indent=2,
+    )
+
+
+class TagSearchInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    query: str = Field(
+        ..., min_length=1, max_length=100,
+        description="Substring to match in tag names, e.g. 'ransomware', 'tlp', 'apt'.",
+    )
+    limit: int = Field(default=50, ge=1, le=500, description="Max tags to return.")
+
+
+@mcp.tool(
+    name="misp_search_tags",
+    annotations={
+        "title": "Search tag definitions by name",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_search_tags(params: TagSearchInput) -> str:
+    """Find tags whose name contains the query - to discover the exact tag
+    string to filter events by (misp_search_events) or apply on submit.
+
+    Returns JSON: {"query", "total", "tags": [{"name", "colour"}]}.
+    """
+    try:
+        tags = await _get_client().tags()
+    except Exception as e:
+        return _error(e)
+    q = params.query.lower()
+    matched = [t for t in tags if q in (t.get("name", "") or "").lower()]
+    matched = matched[: params.limit]
+    return json.dumps(
+        {"query": params.query, "total": len(matched),
+         "tags": [{"name": t.get("name"), "colour": t.get("colour")} for t in matched]},
+        indent=2,
+    )
+
+
+class ObjectInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    object_id: str = Field(..., pattern=r"^\d{1,10}$", description="Numeric MISP object id.")
+    max_attributes: int = Field(default=25, ge=1, le=MAX_RESULTS, description="Max attributes to include.")
+
+
+@mcp.tool(
+    name="misp_get_object",
+    annotations={
+        "title": "Get a MISP object (grouped attributes)",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_get_object(params: ObjectInput) -> str:
+    """Fetch one MISP object by id - a template-structured group of related
+    attributes (e.g. a 'file' object with its name, size, and hashes, or a
+    'domain-ip' object). Redacted if its event is TLP:AMBER/RED and the
+    operator has not opted in.
+
+    Returns JSON: {"id", "name", "event_id", "comment", "attribute_count",
+    "attributes": [{"type", "object_relation", "value", "to_ids"}]}.
+    """
+    client = _get_client()
+    try:
+        obj = await client.get_object(params.object_id)
+        if obj is None:
+            return f"Error: object {params.object_id} not found or not accessible."
+        if not _show_restricted():
+            event = await client.get_event(str(obj.get("event_id")))
+            if client.is_restricted(event):
+                return json.dumps(
+                    {"id": params.object_id, "restricted": True, "note": REDACTION_NOTE}, indent=2
+                )
+    except Exception as e:
+        return _error(e)
+    attributes = obj.get("Attribute", []) or []
+    return json.dumps(
+        {"id": obj.get("id"), "name": obj.get("name"),
+         "event_id": obj.get("event_id"), "comment": obj.get("comment"),
+         "attribute_count": len(attributes),
+         "attributes": [
+             {"type": a.get("type"), "object_relation": a.get("object_relation"),
+              "value": a.get("value"), "to_ids": a.get("to_ids")}
+             for a in attributes[: params.max_attributes]
+         ]},
+        indent=2,
+    )
+
+
+class AttributeInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    attribute_id: str = Field(..., pattern=r"^\d{1,10}$", description="Numeric MISP attribute id.")
+
+
+@mcp.tool(
+    name="misp_get_attribute",
+    annotations={
+        "title": "Get one MISP attribute by id",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_get_attribute(params: AttributeInput) -> str:
+    """Fetch one attribute by its numeric id: full detail plus which event it
+    belongs to. Redacted if that event is TLP:AMBER/RED and the operator has
+    not opted in.
+
+    Returns JSON: {"id", "type", "value", "category", "to_ids", "event_id",
+    "comment", "first_seen", "last_seen"}.
+    """
+    client = _get_client()
+    try:
+        attr = await client.get_attribute(params.attribute_id)
+        if attr is None:
+            return f"Error: attribute {params.attribute_id} not found or not accessible."
+        if not _show_restricted():
+            event = await client.get_event(str(attr.get("event_id")))
+            if client.is_restricted(event):
+                return json.dumps(
+                    {"id": params.attribute_id, "restricted": True, "note": REDACTION_NOTE}, indent=2
+                )
+    except Exception as e:
+        return _error(e)
+    out = {
+        "id": attr.get("id"), "type": attr.get("type"), "value": attr.get("value"),
+        "category": attr.get("category"), "to_ids": attr.get("to_ids"),
+        "event_id": attr.get("event_id"), "comment": attr.get("comment"),
+    }
+    if attr.get("first_seen"):
+        out["first_seen"] = attr["first_seen"]
+    if attr.get("last_seen"):
+        out["last_seen"] = attr["last_seen"]
+    return json.dumps(out, indent=2)
+
+
+class AttributeSearchInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    type: str | None = Field(
+        default=None, max_length=40,
+        description="MISP attribute type, e.g. 'ip-dst', 'domain', 'sha256', 'url'.",
+    )
+    category: str | None = Field(
+        default=None, max_length=60,
+        description="MISP category, e.g. 'Network activity', 'Payload delivery'.",
+    )
+    tag: str | None = Field(
+        default=None, max_length=100,
+        description="Filter to attributes (or their event) carrying this tag.",
+    )
+    to_ids: bool | None = Field(
+        default=None, description="Only detection-flagged (true) or only not (false).",
+    )
+    event_id: str | None = Field(
+        default=None, pattern=r"^\d{1,10}$", description="Restrict to one event.",
+    )
+    days: int | None = Field(
+        default=None, ge=1, le=365, description="Only attributes changed in the last N days.",
+    )
+    limit: int = Field(default=25, ge=1, le=MAX_RESULTS, description="Maximum results.")
+
+
+@mcp.tool(
+    name="misp_search_attributes",
+    annotations={
+        "title": "Search attributes by type, category, tag, or event",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": True,
+    },
+)
+async def misp_search_attributes(params: AttributeSearchInput) -> str:
+    """Search attributes by structured filters (type / category / tag /
+    to_ids / event / recency) rather than by a single IOC value - e.g. "all
+    sha256 flagged for detection in the last 7 days" or "every domain in
+    event 16989". At least one filter is required to keep responses bounded.
+
+    Returns JSON: {"total", "hits": [{"event_id", "event_info",
+    "threat_level", "source_org", "attribute_type", "value", "category",
+    "to_ids", "restricted", ...}]}. Restricted hits are redacted unless
+    opted in.
+    """
+    if not any([params.type, params.category, params.tag, params.to_ids is not None,
+                params.event_id, params.days]):
+        return "Error: provide at least one filter (type, category, tag, to_ids, event_id, days)."
+    try:
+        hits = await _get_client().search_attributes_query(
+            attr_type=params.type, category=params.category, tag=params.tag,
+            to_ids=params.to_ids, event_id=params.event_id, since_days=params.days,
+            limit=params.limit,
+        )
+    except Exception as e:
+        return _error(e)
+    return json.dumps(
+        {"total": len(hits), "hits": [_present_hit(h) for h in hits]},
+        indent=2,
+    )
+
+
 def main() -> None:
     """Entry point. Transport chosen by MCP_TRANSPORT env:
     - 'stdio' (default): local, per-analyst, run by an MCP client.

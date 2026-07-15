@@ -185,6 +185,129 @@ class MispClient:
             return []
         return [f.get("Feed", {}) for f in payload if isinstance(f, dict)]
 
+    # --- knowledge base: galaxies, taxonomies, tags (instance metadata,
+    # not event content, so no TLP redaction applies) ----------------------
+
+    async def search_galaxy_clusters(self, value: str, limit: int = 20) -> list[dict]:
+        """Search galaxy clusters (threat actors, malware, tools, ATT&CK
+        techniques) by name / synonym / value via /galaxy_clusters/restSearch.
+        Returns the GalaxyCluster dicts (tolerant to the list-or-wrapped
+        response shapes MISP uses across versions)."""
+        resp = await self._request(
+            "POST", "/galaxy_clusters/restSearch",
+            json={"value": value, "limit": limit},
+        )
+        body = resp.json()
+        response = body.get("response") if isinstance(body, dict) else body
+        if not isinstance(response, list):
+            return []
+        out: list[dict] = []
+        for item in response[:limit]:
+            if isinstance(item, dict):
+                out.append(item.get("GalaxyCluster", item))
+        return out
+
+    async def galaxies(self) -> list[dict]:
+        """List galaxy types (Threat Actor, Malware, ATT&CK, ...) via
+        /galaxies/index."""
+        resp = await self._request("GET", "/galaxies/index")
+        payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        return [g.get("Galaxy", g) for g in payload if isinstance(g, dict)]
+
+    async def taxonomies(self) -> list[dict]:
+        """List taxonomies (TLP, kill-chain, PAP, ...) via /taxonomies. Each
+        item keeps its Taxonomy dict plus the tag counts MISP returns."""
+        resp = await self._request("GET", "/taxonomies")
+        payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        return [t for t in payload if isinstance(t, dict)]
+
+    async def taxonomy(self, taxonomy_id: str) -> dict | None:
+        """One taxonomy with its predicate/value entries via
+        /taxonomies/view/<id>. None on failure."""
+        try:
+            resp = await self._request("GET", f"/taxonomies/view/{taxonomy_id}")
+        except httpx.HTTPError:
+            return None
+        body = resp.json()
+        return body if isinstance(body, dict) else None
+
+    async def tags(self) -> list[dict]:
+        """All tag definitions via /tags (filtered client-side by the tool)."""
+        resp = await self._request("GET", "/tags")
+        body = resp.json()
+        if isinstance(body, dict):
+            return body.get("Tag") or []
+        if isinstance(body, list):
+            return [t.get("Tag", t) for t in body if isinstance(t, dict)]
+        return []
+
+    # --- direct object / attribute access ----------------------------------
+
+    async def get_object(self, object_id: str) -> dict | None:
+        """One MISP object (a group of related attributes) via
+        /objects/view/<id>. None on failure."""
+        try:
+            resp = await self._request("GET", f"/objects/view/{object_id}")
+        except httpx.HTTPError:
+            return None
+        body = resp.json()
+        if not isinstance(body, dict):
+            return None
+        obj = body.get("Object")
+        return obj if isinstance(obj, dict) else None
+
+    async def get_attribute(self, attribute_id: str) -> dict | None:
+        """One attribute via /attributes/view/<id>. None on failure."""
+        try:
+            resp = await self._request("GET", f"/attributes/view/{attribute_id}")
+        except httpx.HTTPError:
+            return None
+        body = resp.json()
+        if not isinstance(body, dict):
+            return None
+        attr = body.get("Attribute")
+        return attr if isinstance(attr, dict) else None
+
+    async def search_attributes_query(
+        self, *, attr_type: str | None = None, category: str | None = None,
+        tag: str | None = None, to_ids: bool | None = None,
+        event_id: str | None = None, since_days: int | None = None,
+        limit: int = 25,
+    ) -> list[dict]:
+        """Attribute restSearch by structured filters (type/category/tag/
+        to_ids/event/recency) rather than by IOC value. Each hit annotated
+        with is_restricted from its parent event, same as search_attributes."""
+        body: dict = {"limit": limit}
+        if attr_type:
+            body["type"] = attr_type
+        if category:
+            body["category"] = category
+        if tag:
+            body["tags"] = tag
+        if to_ids is not None:
+            body["to_ids"] = to_ids
+        if event_id:
+            body["eventid"] = event_id
+        if since_days:
+            body["timestamp"] = f"{int(since_days)}d"
+        resp = await self._request("POST", "/attributes/restSearch", json=body)
+        payload = resp.json()
+        response = payload.get("response", {}) if isinstance(payload, dict) else {}
+        attrs = (response.get("Attribute") or [])[:limit]
+
+        if self.show_restricted:
+            for a in attrs:
+                a["is_restricted"] = False
+            return attrs
+        events = await self._events_by_id([a.get("event_id") for a in attrs])
+        for a in attrs:
+            a["is_restricted"] = self.is_restricted(events.get(a.get("event_id")))
+        return attrs
+
     async def version(self) -> dict:
         resp = await self._request("GET", "/servers/getVersion.json")
         body = resp.json()

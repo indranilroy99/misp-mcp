@@ -85,6 +85,10 @@ def test_tools_registered():
         "misp_get_event", "misp_search_events", "misp_feed_stats",
         "misp_instance_status", "misp_review_submissions",
         "misp_submit_ioc", "misp_submit_iocs",
+        # v1.3.0 knowledge base + direct access
+        "misp_lookup_galaxy", "misp_list_galaxies", "misp_list_taxonomies",
+        "misp_get_taxonomy", "misp_search_tags", "misp_get_object",
+        "misp_get_attribute", "misp_search_attributes",
     }, sorted(by)
     # All read tools are read-only; only the submit tools write. Nothing destructive.
     write_tools = {"misp_submit_ioc", "misp_submit_iocs"}
@@ -496,6 +500,184 @@ def test_misp_key_auth_middleware():
     assert run(call("/mcp", [(b"x-misp-key", b"")])) == 401  # empty key
     status = run(call("/mcp", [(b"x-misp-key", b"KEY-abc"), (b"x-misp-user", b"a@x.com")]))
     assert status == 200 and seen["key"] == "KEY-abc" and seen["user"] == "a@x.com"
+
+
+# --- v1.3.0 knowledge base + direct access ---------------------------------
+
+
+def test_lookup_galaxy_presents_clusters():
+    c = _fake_client()
+
+    async def sgc(value, limit=20):
+        return [{
+            "value": "APT29", "type": "threat-actor",
+            "tag_name": 'misp-galaxy:threat-actor="APT29"', "uuid": "u-1",
+            "meta": {"synonyms": ["Cozy Bear", "The Dukes"]},
+            "source": "MISP", "description": "Russian state actor.",
+        }]
+
+    c.search_galaxy_clusters = sgc
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_lookup_galaxy(server.GalaxyLookupInput(query="APT29"))))
+    assert out["total"] == 1
+    cl = out["clusters"][0]
+    assert cl["name"] == "APT29" and cl["type"] == "threat-actor"
+    assert cl["synonyms"] == ["Cozy Bear", "The Dukes"]
+    assert cl["tag"] == 'misp-galaxy:threat-actor="APT29"'
+
+
+def test_client_galaxy_clusters_parsing_tolerant():
+    # wrapped {"response": [...]}
+    c = _fake_client(post={"response": [{"GalaxyCluster": {"value": "APT29", "type": "threat-actor"}}]})
+    out = run(c.search_galaxy_clusters("APT29"))
+    assert out and out[0]["value"] == "APT29"
+    # bare list also tolerated
+    c2 = _fake_client(post=[{"GalaxyCluster": {"value": "Lazarus"}}])
+    out2 = run(c2.search_galaxy_clusters("Lazarus"))
+    assert out2 and out2[0]["value"] == "Lazarus"
+    # garbage -> empty, no crash
+    assert run(_fake_client(post={"response": "nope"}).search_galaxy_clusters("x")) == []
+
+
+def test_list_taxonomies_counts_enabled():
+    c = _fake_client()
+
+    async def tx():
+        return [
+            {"Taxonomy": {"namespace": "tlp", "description": "TLP", "enabled": True},
+             "total_count": 4, "current_count": 4},
+            {"Taxonomy": {"namespace": "pap", "description": "PAP", "enabled": False},
+             "total_count": 4, "current_count": 0},
+        ]
+
+    c.taxonomies = tx
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_list_taxonomies()))
+    assert out["total"] == 2 and out["enabled"] == 1
+    assert out["taxonomies"][0]["namespace"] == "tlp" and out["taxonomies"][0]["total_tags"] == 4
+
+
+def test_get_taxonomy_resolves_namespace_to_id():
+    c = _fake_client()
+    got = {}
+
+    async def tx():
+        return [{"Taxonomy": {"id": "3", "namespace": "tlp", "description": "TLP"}}]
+
+    async def one(tid):
+        got["id"] = tid
+        return {"Taxonomy": {"namespace": "tlp", "description": "TLP"},
+                "entries": [{"tag": "tlp:red", "expanded": "Red", "description": "no sharing"}]}
+
+    c.taxonomies = tx
+    c.taxonomy = one
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_get_taxonomy(server.TaxonomyInput(taxonomy="tlp"))))
+    assert got["id"] == "3"  # namespace resolved to numeric id
+    assert out["namespace"] == "tlp" and out["entries"][0]["tag"] == "tlp:red"
+    # unknown namespace -> actionable error, no view call
+    out2 = run(server.misp_get_taxonomy(server.TaxonomyInput(taxonomy="nope")))
+    assert "no taxonomy with namespace" in out2
+
+
+def test_search_tags_filters_by_substring():
+    c = _fake_client()
+
+    async def tags():
+        return [{"name": "ransomware", "colour": "#ff0000"},
+                {"name": "tlp:red", "colour": "#f00"},
+                {"name": "osint", "colour": "#0f0"}]
+
+    c.tags = tags
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_search_tags(server.TagSearchInput(query="ran"))))
+    assert out["total"] == 1 and out["tags"][0]["name"] == "ransomware"
+
+
+def test_get_object_detail_and_redaction():
+    c = _fake_client()
+
+    async def obj(oid):
+        return {"id": "7", "name": "file", "event_id": "16989", "comment": "c",
+                "Attribute": [
+                    {"type": "filename", "object_relation": "filename", "value": "x.exe", "to_ids": False},
+                    {"type": "sha256", "object_relation": "sha256", "value": "a" * 64, "to_ids": True}]}
+
+    c.get_object = obj
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_get_object(server.ObjectInput(object_id="7"))))
+    assert out["name"] == "file" and out["attribute_count"] == 2
+    assert out["attributes"][1]["type"] == "sha256"
+
+    # redaction: restricted parent event + operator not opted in
+    c2 = _fake_client()
+    c2.show_restricted = False
+
+    async def obj2(oid):
+        return {"id": "9", "name": "file", "event_id": "35476", "Attribute": []}
+
+    async def ev(eid):
+        return RESTRICTED_EVENT
+
+    c2.get_object = obj2
+    c2.get_event = ev
+    server._get_client = lambda: c2
+    out2 = json.loads(run(server.misp_get_object(server.ObjectInput(object_id="9"))))
+    assert out2["restricted"] is True and "attributes" not in out2
+
+
+def test_get_attribute_detail_and_redaction():
+    c = _fake_client()
+
+    async def at(aid):
+        return {"id": "5", "type": "ip-dst", "value": "8.8.8.8", "category": "Network activity",
+                "to_ids": True, "event_id": "16989", "comment": "c", "last_seen": "2026-01-01"}
+
+    c.get_attribute = at
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_get_attribute(server.AttributeInput(attribute_id="5"))))
+    assert out["value"] == "8.8.8.8" and out["event_id"] == "16989" and out["last_seen"] == "2026-01-01"
+
+    c2 = _fake_client()
+    c2.show_restricted = False
+
+    async def at2(aid):
+        return {"id": "6", "type": "domain", "value": "secret.example", "event_id": "35476"}
+
+    async def ev(eid):
+        return RESTRICTED_EVENT
+
+    c2.get_attribute = at2
+    c2.get_event = ev
+    server._get_client = lambda: c2
+    out2 = json.loads(run(server.misp_get_attribute(server.AttributeInput(attribute_id="6"))))
+    assert out2["restricted"] is True and "value" not in out2
+
+
+def test_search_attributes_requires_filter_and_presents_hits():
+    c = _fake_client()
+    server._get_client = lambda: c
+    # no filter -> refused before any call
+    out = run(server.misp_search_attributes(server.AttributeSearchInput()))
+    assert "at least one filter" in out
+
+    async def saq(**kw):
+        return [{"event_id": "16989",
+                 "Event": {"info": "Tor", "threat_level_id": "4", "Orgc": {"name": "CERT"}},
+                 "type": "ip-dst", "value": "1.2.3.4", "category": "Network activity",
+                 "to_ids": True, "is_restricted": False}]
+
+    c.search_attributes_query = saq
+    out2 = json.loads(run(server.misp_search_attributes(server.AttributeSearchInput(type="ip-dst"))))
+    assert out2["total"] == 1
+    assert out2["hits"][0]["attribute_type"] == "ip-dst" and out2["hits"][0]["value"] == "1.2.3.4"
+
+
+def test_client_attr_query_annotates_restriction_default():
+    # default show_restricted True -> is_restricted False, no per-event fetch
+    c = _fake_client(post={"response": {"Attribute": [{"event_id": "1", "type": "domain", "value": "x"}]}})
+    out = run(c.search_attributes_query(attr_type="domain"))
+    assert out[0]["is_restricted"] is False and out[0]["type"] == "domain"
 
 
 def main():

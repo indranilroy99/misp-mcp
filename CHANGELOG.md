@@ -4,6 +4,27 @@ All notable changes to misp-mcp are documented here. This project follows
 [Semantic Versioning](https://semver.org/) and the format of
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] — 2026-07-15
+
+### Added
+- Knowledge-base and direct-access read tools, bringing full-client read
+  breadth under the same per-user-auth and TLP-redaction model:
+  - `misp_lookup_galaxy`: search galaxy clusters (threat actors, malware,
+    tools, ATT&CK techniques) by name or synonym — attribution and technique
+    lookup.
+  - `misp_list_galaxies`: list the galaxy types on the instance.
+  - `misp_list_taxonomies`: list taxonomies (TLP, kill-chain, PAP, ...) with
+    enabled state and tag counts.
+  - `misp_get_taxonomy`: one taxonomy's tags and meanings, by namespace or id.
+  - `misp_search_tags`: find tag definitions by name.
+  - `misp_get_object`: one MISP object (grouped attributes), redacted for
+    restricted events.
+  - `misp_get_attribute`: one attribute by id with its event, redacted for
+    restricted events.
+  - `misp_search_attributes`: attribute search by type / category / tag /
+    to_ids / event / recency (at least one filter required).
+- 18 tools total (16 read, 2 write). 60 tests.
+
 ## [1.2.0] — 2026-07-14
 
 ### Added
