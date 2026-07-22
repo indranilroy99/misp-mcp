@@ -100,6 +100,26 @@ def allow_insecure_bind() -> bool:
     return os.environ.get("MISP_MCP_ALLOW_INSECURE_BIND", "false").lower() == "true"
 
 
+# --- optional ti-lookup enrichment (deployment add-on; off in generic build) --
+
+def ti_lookup_url() -> str | None:
+    """Base URL of the ti-lookup enrichment service (MISP-first lookup +
+    VirusTotal / AbuseIPDB / verifymail + write-back). When set, the optional
+    misp_enrich_ioc tool is registered; absent in the generic / open-source
+    build, so the server stays a pure MISP client. The caller's own MISP key is
+    forwarded as X-TI-Key, so attribution and rate-limiting stay per-user."""
+    return os.environ.get("TI_LOOKUP_URL", "").rstrip("/") or None
+
+
+def ti_lookup_timeout() -> float:
+    """Client timeout for a ti-lookup call. A live provider miss can take ~20s,
+    so allow headroom. Default 30s."""
+    try:
+        return max(5.0, float(os.environ.get("TI_LOOKUP_TIMEOUT", "30")))
+    except ValueError:
+        return 30.0
+
+
 @dataclass(frozen=True)
 class Config:
     url: str

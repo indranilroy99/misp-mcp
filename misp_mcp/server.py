@@ -46,6 +46,9 @@ from .config import (
     protected_domains_extra,
     submission_event_id,
     submit_rate_per_min,
+    ti_lookup_timeout,
+    ti_lookup_url,
+    verify_tls,
 )
 from .context import current_misp_key, current_user
 from .validators import classify_ioc, host_of, is_protected, is_public_ip, normalize_ioc
@@ -332,6 +335,71 @@ async def misp_lookup_ioc(params: IocInput) -> str:
         },
         indent=2,
     )
+
+
+async def misp_enrich_ioc(params: IocInput) -> str:
+    """Get a combined verdict for an indicator via the ti-lookup service.
+
+    ti-lookup checks MISP first (free + instant on repeats), then calls the
+    paid feeds (VirusTotal / AbuseIPDB / verifymail) only on a miss, and
+    returns one verdict. NOTE: it also AUTO-RECORDS confirmed-malicious
+    indicators back into MISP under the service identity, so this call may
+    cause a MISP write. The write is driven by the providers' own verdicts,
+    not by free text, so it cannot be steered by prompt-injected input.
+
+    Returns ti-lookup's JSON: {"ioc", "type", "verdict" (malicious /
+    suspicious / clean), "source" ("misp" / "cache" / "live" - whether the
+    answer came free from MISP/cache or cost a live provider call), the
+    per-provider results, and "stored_in_misp" / "misp_event_id" when it was
+    auto-added}.
+    """
+    url = ti_lookup_url()
+    if not url:
+        return "Error: enrichment is not configured on this server (TI_LOOKUP_URL unset)."
+    validated = _validated_ioc(params.ioc)
+    if isinstance(validated, str):
+        return validated
+    ioc, _ioc_type = validated
+    key = current_misp_key.get()
+    if not key:
+        try:
+            key = load_config().api_key
+        except RuntimeError:
+            key = ""
+    if not key:
+        return "Error: no MISP key available to authenticate the enrichment call."
+    try:
+        async with httpx.AsyncClient(
+            timeout=ti_lookup_timeout(), verify=verify_tls()
+        ) as client:
+            resp = await client.post(
+                f"{url}/lookup",
+                json={"ioc": ioc},
+                headers={"X-TI-Key": key, "Content-Type": "application/json"},
+            )
+        if resp.status_code != 200:
+            detail = resp.text[:200].replace("\n", " ")
+            return _error(
+                RuntimeError(f"ti-lookup returned HTTP {resp.status_code}: {detail}")
+            )
+        return json.dumps(resp.json(), indent=2)
+    except Exception as e:
+        return _error(e)
+
+
+# Register the enrichment tool ONLY when ti-lookup is configured, so the
+# generic / open-source build ships without it and stays a pure MISP client.
+if ti_lookup_url():
+    misp_enrich_ioc = mcp.tool(
+        name="misp_enrich_ioc",
+        annotations={
+            "title": "Enrich an IOC (MISP-first + paid feeds via ti-lookup)",
+            "readOnlyHint": False,      # may auto-record a malicious IOC to MISP
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+    )(misp_enrich_ioc)
 
 
 class BatchIocInput(BaseModel):
