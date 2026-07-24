@@ -25,8 +25,10 @@ Security posture, deliberately:
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -93,6 +95,7 @@ mcp = FastMCP(
 # hosted process can't grow the cache without limit.
 _clients: "OrderedDict[str, MispClient]" = OrderedDict()
 _MAX_CLIENTS = 256
+_KEYID_SECRET = os.environ.get("MISP_MCP_KEYID_SECRET", "").encode()
 
 
 def _get_client() -> MispClient:
@@ -117,7 +120,11 @@ def _get_client() -> MispClient:
 def _key_id(client: MispClient) -> str:
     """Stable, non-reversible id for a caller's key, for rate-limit keying
     and logs (never log the key itself)."""
-    return hashlib.sha256(client._config.api_key.encode()).hexdigest()[:16]
+    return hmac.new(
+        _KEYID_SECRET,
+        client._config.api_key.encode(),
+        hashlib.sha256,
+    ).hexdigest()[:16]
 
 
 # Submission timestamps per key id, for the per-minute rate cap.
