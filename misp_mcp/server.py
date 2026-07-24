@@ -338,16 +338,19 @@ async def misp_lookup_ioc(params: IocInput) -> str:
 
 
 async def misp_enrich_ioc(params: IocInput) -> str:
-    """Get a combined verdict for an indicator via the ti-lookup service.
+    """Get a combined verdict for an indicator via an optional MISP-first
+    enrichment service (a `ti-lookup`-compatible `/lookup` endpoint set by
+    `TI_LOOKUP_URL`).
 
-    ti-lookup checks MISP first (free + instant on repeats), then calls the
-    paid feeds (VirusTotal / AbuseIPDB / verifymail) only on a miss, and
-    returns one verdict. NOTE: it also AUTO-RECORDS confirmed-malicious
-    indicators back into MISP under the service identity, so this call may
-    cause a MISP write. The write is driven by the providers' own verdicts,
-    not by free text, so it cannot be steered by prompt-injected input.
+    The service checks MISP first (free + instant on repeats), then calls
+    third-party feeds (e.g. VirusTotal / AbuseIPDB / verifymail) only on a
+    miss, and returns one verdict. NOTE: it may also AUTO-RECORD confirmed-
+    malicious indicators back into MISP under the service identity, so this
+    call can cause a MISP write. The write is driven by the providers' own
+    verdicts, not by free text, so it cannot be steered by prompt-injected
+    input.
 
-    Returns ti-lookup's JSON: {"ioc", "type", "verdict" (malicious /
+    Returns the service's JSON: {"ioc", "type", "verdict" (malicious /
     suspicious / clean), "source" ("misp" / "cache" / "live" - whether the
     answer came free from MISP/cache or cost a live provider call), the
     per-provider results, and "stored_in_misp" / "misp_event_id" when it was
@@ -380,7 +383,7 @@ async def misp_enrich_ioc(params: IocInput) -> str:
         if resp.status_code != 200:
             detail = resp.text[:200].replace("\n", " ")
             return _error(
-                RuntimeError(f"ti-lookup returned HTTP {resp.status_code}: {detail}")
+                RuntimeError(f"enrichment service returned HTTP {resp.status_code}: {detail}")
             )
         return json.dumps(resp.json(), indent=2)
     except Exception as e:
@@ -393,7 +396,7 @@ if ti_lookup_url():
     misp_enrich_ioc = mcp.tool(
         name="misp_enrich_ioc",
         annotations={
-            "title": "Enrich an IOC (MISP-first + paid feeds via ti-lookup)",
+            "title": "Enrich an IOC (MISP-first + external feeds via an enrichment service)",
             "readOnlyHint": False,      # may auto-record a malicious IOC to MISP
             "destructiveHint": False,
             "idempotentHint": False,

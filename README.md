@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.0-informational" alt="version 1.4.0">
+  <img src="https://img.shields.io/badge/version-1.5.0-informational" alt="version 1.5.0">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey" alt="license Apache-2.0">
   <img src="https://img.shields.io/badge/python-3.10%2B-informational" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/tests-65%20passing-lightgrey" alt="65 tests passing">
@@ -23,7 +23,10 @@ misp-mcp connects MISP to any [MCP](https://modelcontextprotocol.io) client
 the client calls MISP, you get the answer. No MISP UI, no REST calls by hand.
 Nineteen tools read from MISP - indicators, events, feeds, the galaxy /
 taxonomy / tag knowledge base, warninglist checks, and worker/job health - and
-two add indicators (single + bulk), all under your own MISP key.
+two add indicators (single + bulk), all under your own MISP key. An optional
+enrichment tool (`misp_enrich_ioc`) bridges to an external MISP-first
+enrichment service when one is configured; it stays hidden otherwise, so the
+default build is a pure MISP client.
 
 ---
 
@@ -228,6 +231,7 @@ lookup:
 | `misp_jobs` | read | Recent background jobs + failures and why (admin key) |
 | `misp_submit_ioc` | **write** | Add a new indicator (needs a write-capable key) |
 | `misp_submit_iocs` | **write** | Bulk: validate + add many indicators (dry-run preview first) |
+| `misp_enrich_ioc` | enrich | Optional: combined verdict via a MISP-first enrichment service (set `TI_LOOKUP_URL`); may auto-record confirmed-bad IOCs |
 
 Paste indicators however you have them - defanged forms (`1.2.3[.]4`,
 `hxxp://evil[.]com`) are cleaned up automatically. Private/reserved IPs are
@@ -337,7 +341,7 @@ python3 -m venv .venv
 
 ```
 misp_mcp/
-  server.py      the 21 tools and the MCP server
+  server.py      the tools and the MCP server
   client.py      talks to the MISP REST API (read + write)
   config.py      reads settings from the environment
   http_app.py    hosted mode: header auth + web server

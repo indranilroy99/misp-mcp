@@ -4,6 +4,22 @@ All notable changes to misp-mcp are documented here. This project follows
 [Semantic Versioning](https://semver.org/) and the format of
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.5.0] — 2026-07-22
+
+### Added
+- `misp_enrich_ioc` (optional, off by default): a combined-verdict enrichment
+  tool that bridges to an external MISP-first enrichment service — it checks
+  MISP first, falls back to third-party feeds (e.g. VirusTotal / AbuseIPDB /
+  verifymail via a `ti-lookup`-compatible `/lookup` endpoint) on a miss, and
+  can auto-record confirmed-malicious indicators back to MISP. Registered only
+  when `TI_LOOKUP_URL` is set, so the default build stays a pure MISP client.
+  The caller's own MISP key is forwarded as `X-TI-Key`, keeping per-user
+  attribution and rate-limiting. Marked non-read-only (it may write).
+
+### Config
+- `TI_LOOKUP_URL` — base URL of the optional enrichment service (unset = tool
+  hidden). `TI_LOOKUP_TIMEOUT` — request timeout in seconds (default 30).
+
 ## [1.4.0] — 2026-07-15
 
 ### Added
