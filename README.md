@@ -13,72 +13,131 @@
   <img src="https://img.shields.io/badge/version-1.5.0-informational" alt="version 1.5.0">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey" alt="license Apache-2.0">
   <img src="https://img.shields.io/badge/python-3.10%2B-informational" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-65%20passing-lightgrey" alt="65 tests passing">
+  <img src="https://img.shields.io/badge/tests-67%20passing-lightgrey" alt="67 tests passing">
 </p>
 
 ---
 
-misp-mcp connects MISP to any [MCP](https://modelcontextprotocol.io) client
-(Claude Desktop, Claude Code, Cursor, and others). You ask in plain language,
-the client calls MISP, you get the answer. No MISP UI, no REST calls by hand.
-Nineteen tools read from MISP - indicators, events, feeds, the galaxy /
-taxonomy / tag knowledge base, warninglist checks, and worker/job health - and
-two add indicators (single + bulk), all under your own MISP key. An optional
-enrichment tool (`misp_enrich_ioc`) bridges to an external MISP-first
-enrichment service when one is configured; it stays hidden otherwise, so the
-default build is a pure MISP client.
+misp-mcp connects [MISP](https://www.misp-project.org/) to any
+[MCP](https://modelcontextprotocol.io) client (Claude Desktop, Claude Code,
+Cursor, and others). You ask in plain language, the client calls MISP, you get
+the answer. No MISP UI, no REST calls by hand.
+
+It exposes **22 tools**: 19 read (indicators, events, feeds, the galaxy /
+taxonomy / tag knowledge base, warninglist checks, worker/job health), 2 gated
+write (add indicators, single + bulk), and 1 optional enrichment bridge. Every
+call runs under **your own MISP key** - the server holds no credential of its
+own.
+
+## How it works
+
+```mermaid
+flowchart LR
+    C["MCP client<br/>Claude · Cursor · any"] -->|"X-MISP-Key: your key"| S["misp-mcp<br/>stdio or HTTP"]
+    S -->|"read (19 tools)"| M[("your MISP")]
+    S -->|"write (2 tools, gated)"| M
+    S -. "optional (TI_LOOKUP_URL)" .-> E["enrichment service"]
+    M -. "authorizes + attributes<br/>every call to you" .-> S
+```
+
+- **Your key is the credential.** It rides in a header; MISP validates it on the
+  real call and attributes the query to you. No shared account.
+- **Read by default, writes gated.** A read-only key can look things up; adding
+  indicators needs a write-capable key (held by the security team).
+- **Enrichment is optional.** Set `TI_LOOKUP_URL` to bridge to a MISP-first
+  enrichment service; unset, the tool stays hidden and this is a pure MISP
+  client.
 
 ---
 
-## Connect to the hosted server
+## Get started
 
-> The server runs at `https://misp.example.com/mcp`. There is nothing to
-> install; point your MCP client at it with your own MISP key. You must be on the
-> your corporate network or VPN (the endpoint is not on the public internet).
+Two ways to use it. If you have your own MISP, **run it locally** (below). If
+your org already hosts misp-mcp, skip to [Connect to a hosted
+server](#connect-to-a-hosted-server).
 
-### 1. Get your MISP key (one time)
+### Run it locally
 
-1. Open `https://misp.example.com` and log in.
-2. Top-right menu → **My Profile → Auth Keys → Add authentication key**.
-3. Comment it `misp-mcp <your-name>`, then **copy the key** - MISP shows it once.
-   A read-only key is enough for lookups.
+Your MCP client launches misp-mcp as a local process (stdio) that talks to your
+own MISP with your key. One user (you), nothing to host.
 
-Keep the key private - every query runs *as you*.
-
-### 2. Connect your MCP client
-
-This is a standard remote MCP server over streamable HTTP, so any MCP-capable
-client works - Claude Desktop, Claude Code, Cursor, Windsurf, Cline, Continue,
-Zed, VS Code (Copilot/MCP), Goose, and others. Whatever the client, it needs the
-same three things:
-
-1. Transport: **HTTP** (streamable HTTP / remote MCP)
-2. URL: `https://misp.example.com/mcp`
-3. Two headers: `X-MISP-Key: YOUR_KEY_HERE` and `X-MISP-User: you@example.com`
-
-**Generic config** - most clients read a JSON block like this (the key names
-vary slightly by client - `mcpServers`, `servers`, or `mcp.servers`; check your
-client's docs, the values are identical):
-
-```json
-{
-  "mcpServers": {
-    "misp": {
-      "type": "http",
-      "url": "https://misp.example.com/mcp",
-      "headers": {
-        "X-MISP-Key": "YOUR_KEY_HERE",
-        "X-MISP-User": "you@example.com"
-      }
-    }
-  }
-}
+```mermaid
+flowchart LR
+    A["Your MCP client<br/>Claude Desktop/Code · Cursor"] -->|"launches (stdio)"| B["misp-mcp<br/>your key in env"]
+    B -->|"HTTPS"| M[("your MISP")]
 ```
 
-<details>
-<summary><b>Per-client examples</b></summary>
+1. **Install it** from source:
 
-**Claude Code** (one command in a terminal):
+   ```bash
+   git clone https://github.com/indranilroy99/misp-mcp.git
+   cd misp-mcp
+   ./install.sh
+   ```
+
+   `install.sh` checks your environment, installs the `misp-mcp` binary, and can
+   auto-write your client config. Manual steps are in
+   [ONBOARDING.md](ONBOARDING.md).
+
+2. **Point your client at it.** Add a stdio server with two env vars -
+   `MISP_URL` and your `MISP_API_KEY`. Claude Code, one command:
+
+   ```bash
+   claude mcp add misp --scope user \
+     -e MISP_URL=https://misp.example.com \
+     -e MISP_API_KEY=YOUR_KEY_HERE \
+     -- misp-mcp
+   ```
+
+   Other clients: add an `mcpServers` entry running the `misp-mcp` command with
+   those two env vars, then fully restart the app.
+
+3. **Try it.** Ask your assistant *"Is MISP healthy?"* or *"Look up 8.8.8.8 in
+   MISP."* If it answers from MISP, you're set.
+
+Prefer Docker or a team deployment? See [Host it for a team](#host-it-for-a-team).
+
+### Connect to a hosted server
+
+If your org runs misp-mcp behind a URL, there's nothing to install - point your
+client at it with your own key. You must be on the network / VPN that can reach
+it.
+
+1. **Get your MISP key** (one time): open MISP → **My Profile → Auth Keys → Add
+   authentication key**, comment it `misp-mcp <your-name>`, copy it (shown
+   once). A read-only key is enough for lookups. Keep it private - every query
+   runs *as you*.
+
+2. **Add the server** - any MCP client that speaks streamable HTTP with custom
+   headers works. It needs three things: transport `http`, the URL, and two
+   headers.
+
+   ```json
+   {
+     "mcpServers": {
+       "misp": {
+         "type": "http",
+         "url": "https://misp.example.com/mcp",
+         "headers": {
+           "X-MISP-Key": "YOUR_KEY_HERE",
+           "X-MISP-User": "you@example.com"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Check it works**: this should print `401` (endpoint reachable, auth
+   required):
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST https://misp.example.com/mcp
+   ```
+
+<details>
+<summary><b>Per-client setup (Claude Code, VS Code, Cursor, others)</b></summary>
+
+**Claude Code** (one terminal command):
 
 ```bash
 claude mcp add --transport http misp https://misp.example.com/mcp \
@@ -87,87 +146,33 @@ claude mcp add --transport http misp https://misp.example.com/mcp \
   --header "X-MISP-User: you@example.com"
 ```
 
-**Claude Desktop / Cursor / Windsurf** - add the generic `mcpServers` block
-above to the client's MCP JSON config, then fully restart the app.
+**Claude Desktop / Cursor / Windsurf** - add the `mcpServers` block above to the
+client's MCP JSON config, then fully restart the app.
 
 **VS Code (Copilot MCP)** - in `.vscode/mcp.json` or user settings, under
-`"servers"`:
+`"servers"`, use the same `type`/`url`/`headers` shape.
 
-```json
-{
-  "servers": {
-    "misp": {
-      "type": "http",
-      "url": "https://misp.example.com/mcp",
-      "headers": {
-        "X-MISP-Key": "YOUR_KEY_HERE",
-        "X-MISP-User": "you@example.com"
-      }
-    }
-  }
-}
-```
-
-**Cline / Continue / Zed / Goose and other clients** - use the same URL,
-`http` transport, and the two headers, in whatever config format the client
-uses. Anything that speaks remote MCP over HTTP and can send custom headers
-will work; the two `X-MISP-*` headers are the only server-specific part.
-
-Any client that cannot send custom HTTP headers is not supported (the key must
-ride in `X-MISP-Key`).
+**Cline / Continue / Zed / Goose and others** - same URL, `http` transport, and
+the two `X-MISP-*` headers, in whatever config format the client uses. Any
+client that cannot send custom HTTP headers is not supported (the key must ride
+in `X-MISP-Key`).
 
 </details>
 
-### 3. Check it works
-
-Reachability check (client-agnostic) - should print `401`, which proves you can
-reach the endpoint and that auth is required:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' -X POST https://misp.example.com/mcp
-```
-
-If your client has a way to list MCP servers, confirm `misp` shows connected
-(Claude Code: `claude mcp list` → `misp ... ✓ Connected`; other clients show it
-in their MCP/tools panel).
-
-Then ask your assistant these - if they answer from MISP, you're set:
-
-| Ask this | You should get |
-|---|---|
-| `Is MISP healthy?` | reachable, MISP + server version |
-| `Look up 102.130.113.9 in MISP.` | hits (Tor / DDoS), detection-flagged |
-| `Look up 45.9.148.99 in MISP.` | "not seen in MISP" (not "safe") |
-| `Triage these against MISP: 8.8.8.8, evil.com, <a hash>` | per-indicator verdicts |
-
-**Not working?**
-- 401 / timeout when asking → you're not on your network / VPN.
-- `claude mcp list` not "Connected" → re-check the key and headers.
-- Tools missing, stale, or the assistant says "no such tool" → **reconnect** (below).
-
-### Reconnect / restart it
-
-MCP clients cache the tool list when they connect. If the server stops
-responding, shows the wrong tools, or was updated, the fix in every client is
-the same: **fully quit and reopen the app** (not just the conversation or
-window - an in-app `/mcp` reconnect or a new chat is often not enough). If tools
-are still stale, remove the `misp` server from the config, save, reopen, add it
-back, and reopen again.
-
-New tools added on the server only appear after this full restart.
-
 <details>
-<summary><b>Claude Code re-register</b></summary>
+<summary><b>Tools missing or stale? Reconnect.</b></summary>
+
+MCP clients cache the tool list at connect time. If tools are wrong or the
+server was updated, **fully quit and reopen the app** (an in-app reconnect or a
+new chat is often not enough). Still stale: remove the `misp` server, save,
+reopen, add it back, reopen again.
+
+Claude Code:
 
 ```bash
 claude mcp remove misp
-claude mcp add --transport http misp https://misp.example.com/mcp \
-  --scope user \
-  --header "X-MISP-Key: YOUR_KEY_HERE" \
-  --header "X-MISP-User: you@example.com"
+# then re-add (see above) and fully restart Claude Code
 ```
-Then quit Claude Code completely and reopen it. Check with `claude mcp list` →
-`misp ... ✓ Connected`, and `/mcp` shows the current tools.
 
 </details>
 
@@ -183,26 +188,17 @@ Then quit Claude Code completely and reopen it. Check with `claude mcp list` →
 "Is MISP healthy? How many feeds are on?"
 ```
 
-Behind the scenes the client calls a tool and gets structured JSON, e.g. for a
-lookup:
+Paste indicators however you have them - defanged forms (`1.2.3[.]4`,
+`hxxp://evil[.]com`) are cleaned up automatically; private/reserved IPs are
+rejected. Behind the scenes a tool returns structured JSON, e.g. a lookup:
 
 ```json
 {
-  "ioc": "102.130.113.9",
-  "ioc_type": "ipv4",
-  "total_hits": 6,
-  "summary": {
-    "seen_in_misp": true,
-    "event_count": 6,
-    "detection_flagged": true,
-    "max_threat_level": "Medium",
-    "restricted_hits": 0
-  },
-  "hits": [
-    { "event_id": "16989", "event_info": "Tor exit nodes feed",
-      "attribute_type": "ip-dst", "value": "102.130.113.9",
-      "to_ids": true, "restricted": false }
-  ]
+  "ioc": "102.130.113.9", "ioc_type": "ipv4", "total_hits": 6,
+  "summary": { "seen_in_misp": true, "detection_flagged": true,
+               "max_threat_level": "Medium", "restricted_hits": 0 },
+  "hits": [ { "event_id": "16989", "event_info": "Tor exit nodes feed",
+              "value": "102.130.113.9", "to_ids": true, "restricted": false } ]
 }
 ```
 
@@ -217,7 +213,7 @@ lookup:
 | `misp_search_events` | read | Search events by title, tag, or date |
 | `misp_feed_stats` | read | How many feeds exist and which are on |
 | `misp_instance_status` | read | Reachability + auth check; run first when a tool fails |
-| `misp_review_submissions` | read | Audit recent submissions: what was added, by whom, what's detection-flagged |
+| `misp_review_submissions` | read | Audit recent submissions: what was added, by whom |
 | `misp_lookup_galaxy` | read | Threat actors, malware, tools, ATT&CK techniques by name or synonym |
 | `misp_list_galaxies` | read | Galaxy types available on the instance |
 | `misp_list_taxonomies` | read | Taxonomies (TLP, kill-chain, PAP) and whether each is enabled |
@@ -231,84 +227,65 @@ lookup:
 | `misp_jobs` | read | Recent background jobs + failures and why (admin key) |
 | `misp_submit_ioc` | **write** | Add a new indicator (needs a write-capable key) |
 | `misp_submit_iocs` | **write** | Bulk: validate + add many indicators (dry-run preview first) |
-| `misp_enrich_ioc` | enrich | Optional: combined verdict via a MISP-first enrichment service (set `TI_LOOKUP_URL`); may auto-record confirmed-bad IOCs |
-
-Paste indicators however you have them - defanged forms (`1.2.3[.]4`,
-`hxxp://evil[.]com`) are cleaned up automatically. Private/reserved IPs are
-rejected (not routable, can't identify an external threat).
+| `misp_enrich_ioc` | enrich | Optional: combined verdict via a MISP-first enrichment service (`TI_LOOKUP_URL`); may auto-record confirmed-bad IOCs |
 
 ## Security
 
 - **Your key is the authorization.** MISP checks it on every call and attributes
-  the action to you. A read-only key cannot write; only write-capable keys (the
-  security team) can add indicators.
+  the action to you. A read-only key cannot write; only write-capable keys can
+  add indicators.
 - **Guarded write path.** Submissions are rate-limited, well-known / first-party
-  infrastructure can never be submitted, and the submitter is read from MISP
-  itself - not a value the caller sets (so `misp_review_submissions` shows who
-  *actually* added each IOC).
-- **MISP content is data, not instructions.** Don't submit an indicator from a
-  lookup without checking it yourself.
+  infrastructure can never be submitted (anti-poisoning safelist), and the
+  submitter is read from MISP itself, not a value the caller sets.
+- **Fail-closed TLP.** With server-side redaction on, an event whose tags can't
+  be read is treated as restricted, never revealed.
 - **Keys stay private.** No shared key on the server; the key rides in a header
   over TLS. Logs never contain keys or IOC values.
 
-## Architecture
+Report a vulnerability privately: [SECURITY.md](SECURITY.md).
 
-The shape is the same on any host: callers reach misp-mcp over HTTPS through a
-TLS-terminating load balancer (or the process's own cert), and misp-mcp calls
-your MISP. It holds no credential of its own - every request carries the
-caller's own `X-MISP-Key`, which MISP validates and attributes to that user.
+---
 
-```
-  MCP client  (any client, on an allowed network / VPN)
-       │
-       │  HTTPS  +  header  X-MISP-Key: <your key>
-       ▼
-  Load balancer            TLS termination · ingress limited to allowed CIDRs
-       │  HTTP :8080  (private)
-       ▼
-  misp-mcp                 container / VM, no stored secret
-       │  HTTPS
-       ▼
-  your MISP instance
+## Host it for a team
+
+Run misp-mcp as an HTTP server so a whole team can use it, each with their own
+MISP key. It holds no credential - every request carries the caller's
+`X-MISP-Key`, which MISP validates and attributes.
+
+```mermaid
+flowchart LR
+    U1["Analyst A"] --> LB
+    U2["Analyst B"] --> LB
+    LB["TLS proxy / load balancer<br/>ingress: your VPN CIDRs only"] -->|"HTTP :8080 (private)"| S["misp-mcp (HTTP)<br/>no stored key"]
+    S -->|"HTTPS"| M[("your MISP")]
 ```
 
-- TLS terminates at the load balancer; misp-mcp serves plain HTTP on `:8080`
-  behind it (or give the process its own cert, see [DEPLOY.md](DEPLOY.md)).
-- Ingress is scoped to your caller networks; the endpoint is not public.
-- Two common topologies: run misp-mcp **standalone** in front of a separate
-  MISP (the Terraform module below), or **co-locate** it beside an existing
-  MISP behind one load balancer with a `/mcp*` path rule so MISP is untouched.
+TLS terminates at the load balancer; misp-mcp serves plain HTTP on `:8080`
+behind it (or give the process its own cert). Keep ingress scoped to your caller
+networks - the endpoint is not public. Pick a path:
 
-## Host it (local, self-host, or cloud)
+| Path | Use it for | Guide |
+|---|---|---|
+| **Docker** | Fastest single host | see below |
+| **Self-host (VM + systemd)** | A team, your own box | [DEPLOY.md](DEPLOY.md) |
+| **Cloud (AWS / GCP / Azure)** | Any provider, hand steps | [CLOUD.md](CLOUD.md) |
+| **AWS Terraform** | One `terraform apply`, ALB + TLS | [deploy/terraform/](deploy/terraform/) |
 
-- **Docker** (fastest): run the published image against your own MISP.
-  ```bash
-  docker run -d -p 127.0.0.1:8080:8080 \
-    -e MCP_TRANSPORT=http -e MCP_HOST=0.0.0.0 \
-    -e MISP_URL=https://misp.example.com \
-    -e MISP_MCP_ALLOW_INSECURE_BIND=true \
-    ghcr.io/indranilroy99/misp-mcp:latest
-  # or: MISP_URL=https://misp.example.com docker compose up -d
-  ```
-  Bind stays on localhost; front it with your own TLS proxy for remote use (the
-  key is a bearer credential).
-- **Local** (in your MCP client, against your own MISP): install and add the
-  `misp-mcp` binary - see [ONBOARDING.md](ONBOARDING.md).
-- **Self-host** for a team (HTTP server behind TLS, EC2/VM + systemd):
-  [DEPLOY.md](DEPLOY.md).
-- **Cloud, any provider** (AWS / GCP / Azure guidance): [CLOUD.md](CLOUD.md).
-- **AWS, Terraform** - ready modules behind an internal ALB with TLS, in two
-  flavors sharing one networking module: **Fargate** (serverless, no VM) or
-  **EC2** (managed VM, SSM access): [deploy/terraform/](deploy/terraform/). Fill
-  in a `.tfvars`, `terraform apply`, and it prints the `/mcp` endpoint.
-
-Automated local setup (from source):
+**Docker** (bind stays on localhost; front it with your own TLS proxy for remote
+use - the key is a bearer credential):
 
 ```bash
-git clone https://github.com/indranilroy99/misp-mcp.git
-cd misp-mcp
-./install.sh
+docker run -d -p 127.0.0.1:8080:8080 \
+  -e MCP_TRANSPORT=http -e MCP_HOST=0.0.0.0 \
+  -e MISP_URL=https://misp.example.com \
+  -e MISP_MCP_ALLOW_INSECURE_BIND=true \
+  ghcr.io/indranilroy99/misp-mcp:latest
+# or: MISP_URL=https://misp.example.com docker compose up -d
 ```
+
+The Terraform modules ship two flavors sharing one networking module: **Fargate**
+(serverless, no VM) or **EC2** (managed VM, SSM access), each behind an internal
+ALB with TLS.
 
 <details>
 <summary><b>All settings</b></summary>
@@ -316,7 +293,7 @@ cd misp-mcp
 | Setting | Mode | Default | Meaning |
 |---|---|---|---|
 | `MISP_URL` | both | required | MISP base URL |
-| `MISP_API_KEY` | local | required | your key (local mode) |
+| `MISP_API_KEY` | local | required | your key (local/stdio mode) |
 | `MCP_TRANSPORT` | both | `stdio` | `stdio` for local, `http` for hosted |
 | `MCP_HOST` | hosted | `127.0.0.1` | bind address |
 | `MCP_PORT` | hosted | `8080` | port |
@@ -327,6 +304,7 @@ cd misp-mcp
 | `MISP_MCP_SUBMIT_RATE` | both | `20` | max submissions per key per minute |
 | `MISP_MCP_TLS_CERT` / `MISP_MCP_TLS_KEY` | hosted | none | serve HTTPS directly |
 | `MISP_MCP_ALLOW_INSECURE_BIND` | hosted | `false` | allow a public plain-HTTP bind (TLS on a proxy) |
+| `TI_LOOKUP_URL` | both | unset | optional enrichment endpoint (enables `misp_enrich_ioc`) |
 
 </details>
 
@@ -336,7 +314,7 @@ cd misp-mcp
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest tests/ -q            # 65 tests
+.venv/bin/python -m pytest tests/ -q            # 67 tests, offline
 ```
 
 ```
@@ -350,15 +328,7 @@ misp_mcp/
 ```
 
 Dependencies are pinned in `pyproject.toml`: `mcp`, `httpx`, `pydantic`,
-`uvicorn`, `starlette`.
-
-</details>
-
-<details>
-<summary><b>Security reporting &amp; license</b></summary>
-
-Report vulnerabilities privately - see [SECURITY.md](SECURITY.md). Licensed under
-Apache-2.0 ([LICENSE](LICENSE)). Contributions welcome - see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+`uvicorn`, `starlette`. Licensed under Apache-2.0 ([LICENSE](LICENSE)).
+Contributions welcome - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 </details>

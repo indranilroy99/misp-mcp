@@ -772,6 +772,58 @@ def test_search_attributes_pagination_has_more():
     assert out["page"] == 2 and out["count"] == 5 and out["has_more"] is True
 
 
+def test_enrich_ioc_unconfigured_returns_error():
+    # Off by default: with no TI_LOOKUP_URL the tool declines cleanly rather
+    # than calling an undefined endpoint.
+    os.environ.pop("TI_LOOKUP_URL", None)
+    out = run(server.misp_enrich_ioc(server.IocInput(ioc="evil.com")))
+    assert out.startswith("Error") and "not configured" in out
+
+
+def test_enrich_ioc_forwards_caller_key_and_returns_verdict():
+    # When configured, it POSTs to <TI_LOOKUP_URL>/lookup, forwards the
+    # caller's OWN MISP key as X-TI-Key (per-user attribution), and returns
+    # the service's verdict unchanged.
+    os.environ["TI_LOOKUP_URL"] = "http://ti.example:8091"
+    captured: dict = {}
+    verdict = {"ioc": "evil.com", "type": "domain", "verdict": "malicious",
+               "source": "live", "stored_in_misp": True}
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return verdict
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured.update(url=url, json=json, headers=headers)
+            return _Resp()
+
+    orig = server.httpx.AsyncClient
+    server.httpx.AsyncClient = _FakeClient
+    try:
+        out = json.loads(run(server.misp_enrich_ioc(server.IocInput(ioc="evil.com"))))
+    finally:
+        server.httpx.AsyncClient = orig
+        os.environ.pop("TI_LOOKUP_URL", None)
+
+    assert out["verdict"] == "malicious"
+    assert captured["url"].endswith("/lookup")
+    assert captured["json"] == {"ioc": "evil.com"}
+    assert captured["headers"]["X-TI-Key"] == "test-key"
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

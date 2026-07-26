@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 .env
 .gstack/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+# terraform provider binaries + local state (never commit; keep .terraform.lock.hcl)
+**/.terraform/
+*.tfstate
+*.tfstate.*
