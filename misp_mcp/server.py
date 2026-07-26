@@ -24,10 +24,12 @@ Security posture, deliberately:
 """
 
 import asyncio
-import hashlib
+import hmac
 import json
 import logging
+import os
 import re
+import secrets
 import sys
 import time
 from collections import OrderedDict
@@ -117,10 +119,22 @@ def _get_client() -> MispClient:
     return client
 
 
+# Keyed-MAC secret for the caller key-id. When MISP_MCP_KEYID_SECRET is set the
+# ids are stable across restarts/replicas AND can't be correlated back to a known
+# key without it; unset, a random per-process secret is used (fine for the
+# in-memory rate limiter; log ids just won't correlate across restarts). Keyed
+# HMAC rather than a raw hash, so a truncated id seen in a log can't be
+# brute-forced back to the key.
+_KEYID_SECRET = (os.environ.get("MISP_MCP_KEYID_SECRET") or secrets.token_hex(32)).encode()
+
+
 def _key_id(client: MispClient) -> str:
-    """Stable, non-reversible id for a caller's key, for rate-limit keying
-    and logs (never log the key itself)."""
-    return hashlib.sha256(client._config.api_key.encode()).hexdigest()[:16]
+    """Stable, non-reversible id for a caller's key, for rate-limit keying and
+    logs (never log the key itself). HMAC-keyed so a truncated id can't be
+    reversed or correlated to a known key without the server secret."""
+    return hmac.new(
+        _KEYID_SECRET, client._config.api_key.encode(), "sha256"
+    ).hexdigest()[:16]
 
 
 # Submission timestamps per key id, for the per-minute rate cap.

@@ -311,6 +311,7 @@ ALB with TLS.
 | `MISP_SUBMISSION_EVENT_ID` | both | required for writes | event that `misp_submit_ioc` writes to |
 | `MISP_MCP_PROTECTED_DOMAINS` | both | empty | your own domains that can never be submitted |
 | `MISP_MCP_SUBMIT_RATE` | both | `20` | max submissions per key per minute |
+| `MISP_MCP_KEYID_SECRET` | both | random | HMAC secret for the internal key-id (rate-limit/log). Set it to keep ids stable across restarts/replicas; unset uses a per-process random secret |
 | `MISP_MCP_TLS_CERT` / `MISP_MCP_TLS_KEY` | hosted | none | serve HTTPS directly |
 | `MISP_MCP_ALLOW_INSECURE_BIND` | hosted | `false` | allow a public plain-HTTP bind (TLS on a proxy) |
 | `TI_LOOKUP_URL` | both | unset | optional enrichment endpoint (enables `misp_enrich_ioc`) |
