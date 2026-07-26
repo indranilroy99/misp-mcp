@@ -67,6 +67,13 @@ flowchart LR
     B -->|"HTTPS"| M[("your MISP")]
 ```
 
+> **Where's your MISP?** `MISP_URL` is your MISP's address, wherever it runs -
+> a local Docker instance (`https://localhost`), one on your network
+> (`https://misp.lan`), or a cloud-hosted one (`https://misp.yourco.com`). Only
+> the URL changes. For a local or self-signed instance, also set
+> `MISP_VERIFY_TLS=false`. misp-mcp just needs to be able to reach that URL -
+> join your VPN first if the MISP is private.
+
 1. **Install it** from source:
 
    ```bash
@@ -260,9 +267,11 @@ flowchart LR
     S -->|"HTTPS"| M[("your MISP")]
 ```
 
-TLS terminates at the load balancer; misp-mcp serves plain HTTP on `:8080`
-behind it (or give the process its own cert). Keep ingress scoped to your caller
-networks - the endpoint is not public. Pick a path:
+Run it somewhere that can reach your MISP - the same VPC/network if your MISP is
+cloud-hosted or private, or alongside it (set `MISP_URL` to its address, as
+above). TLS terminates at the load balancer; misp-mcp serves plain HTTP on
+`:8080` behind it (or give the process its own cert). Keep ingress scoped to
+your caller networks - the endpoint is not public. Pick a path:
 
 | Path | Use it for | Guide |
 |---|---|---|
