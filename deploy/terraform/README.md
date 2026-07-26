@@ -45,12 +45,12 @@ operational model you want; the security posture is equivalent.
 
   ```bash
   # from the repo root
-  docker build -t misp-mcp:1.2.0 .
+  docker build -t misp-mcp:1.5.0 .
   aws ecr create-repository --repository-name misp-mcp   # once
   aws ecr get-login-password --region <region> | docker login --username AWS \
     --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
-  docker tag misp-mcp:1.2.0 <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
-  docker push <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
+  docker tag misp-mcp:1.5.0 <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.5.0
+  docker push <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.5.0
   ```
 
 ## Use

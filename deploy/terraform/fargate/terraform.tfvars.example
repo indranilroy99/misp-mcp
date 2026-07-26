@@ -7,10 +7,10 @@ service_subnet_ids = ["subnet-private-a", "subnet-private-b"] # Fargate tasks
 alb_subnet_ids     = ["subnet-private-a", "subnet-private-b"] # internal ALB
 
 # Build from the repo Dockerfile and push to your registry:
-#   docker build -t misp-mcp:1.2.0 .
-#   docker tag misp-mcp:1.2.0 <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
-#   docker push <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.2.0
-container_image = "<acct>.dkr.ecr.us-east-1.amazonaws.com/misp-mcp:1.2.0"
+#   docker build -t misp-mcp:1.5.0 .
+#   docker tag misp-mcp:1.5.0 <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.5.0
+#   docker push <acct>.dkr.ecr.<region>.amazonaws.com/misp-mcp:1.5.0
+container_image = "<acct>.dkr.ecr.us-east-1.amazonaws.com/misp-mcp:1.5.0"
 
 misp_url        = "https://misp.internal"
 misp_verify_tls = true

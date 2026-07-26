@@ -317,6 +317,27 @@ def test_lookup_redacts_restricted_by_default():
     assert "secret.example" not in json.dumps(out)
 
 
+def test_lookup_verdict_counts_restricted_threat():
+    # A restricted High-threat hit must still drive the verdict (never
+    # understated), even though its details stay redacted in the hits array.
+    fake = _fake_client()
+
+    async def sa(value, limit=20):
+        return [
+            {"event_id": "9", "type": "ip-dst", "value": "9.9.9.9", "to_ids": True,
+             "Event": {"info": "Amber", "threat_level_id": "1"}, "is_restricted": True},
+        ]
+
+    fake.search_attributes = sa
+    fake.show_restricted = False
+    server._get_client = lambda: fake
+    out = json.loads(run(server.misp_lookup_ioc(server.IocInput(ioc="9.9.9.9"))))
+    assert out["summary"]["max_threat_level"] == "High"
+    assert out["summary"]["detection_flagged"] is True
+    assert out["summary"]["restricted_hits"] == 1
+    assert out["hits"][0] == {"event_id": "9", "restricted": True, "note": server.REDACTION_NOTE}
+
+
 def test_lookup_rejects_invalid_and_private_iocs():
     _c = _fake_client()
     server._get_client = lambda: _c
@@ -736,6 +757,8 @@ def test_worker_status_summarizes_queues():
     assert out["raw_ok"] is True and len(out["queues"]) == 2
     email = next(q for q in out["queues"] if q["queue"] == "email")
     assert email["workers"] == 0 and email["jobs"] == 12
+    default = next(q for q in out["queues"] if q["queue"] == "default")
+    assert default["workers"] == 5 and default["jobs"] == 0  # idle queue -> 0, not null
 
 
 def test_jobs_filters_failed_and_maps_status():

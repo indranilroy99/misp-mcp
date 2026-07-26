@@ -22,8 +22,7 @@ python3 -m venv .venv
 
 `misp_mcp/__init__.py` is the single source of truth for the version (pyproject
 reads it dynamically; `misp-mcp --version` and `misp_instance_status` read it at
-runtime). To bump it and keep the static surfaces (banner SVGs, README badge) in
-sync, run:
+runtime). To bump it and keep the README version badge in sync, run:
 
 ```bash
 python scripts/bump_version.py 1.1.0

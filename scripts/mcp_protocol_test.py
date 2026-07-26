@@ -40,7 +40,7 @@ async def main() -> int:
             tools = (await session.list_tools()).tools
             names = sorted(t.name for t in tools)
             print(f"tools ({len(names)}): {', '.join(names)}")
-            assert len(names) == 10, f"expected 10 tools, got {len(names)}"
+            assert len(names) >= 21, f"expected >= 21 tools, got {len(names)}"
 
             print("\n--- misp_instance_status ---")
             r = await session.call_tool("misp_instance_status", {})

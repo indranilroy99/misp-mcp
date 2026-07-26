@@ -68,7 +68,6 @@ _CATEGORY = {
     "email": "Payload delivery",
     "md5": "Payload delivery", "sha1": "Payload delivery", "sha256": "Payload delivery",
 }
-_HASH_TYPES = {"md5", "sha1", "sha256"}
 _IP_TYPES = {"ipv4", "ipv6"}
 
 # stdio MCP servers must NEVER write to stdout — that channel carries the
@@ -251,19 +250,21 @@ def _present_hit(attr: dict) -> dict:
 
 
 def _lookup_summary(hits: list[dict]) -> dict:
-    """Derived verdict for a set of hits (no extra API calls). Restricted
-    hits still count toward totals so the verdict is never understated."""
+    """Derived verdict for a set of hits (no extra API calls). The threat level
+    and detection flag are computed over ALL hits, including TLP-restricted
+    ones, so the verdict is never understated when a hit's details are redacted
+    - the caller still learns 'this is bad, contact SOC' without seeing the
+    restricted content (which _present_hit still withholds)."""
     threat_rank = {"High": 3, "Medium": 2, "Low": 1, "Undefined": 0}
-    visible = [h for h in hits if not h.get("is_restricted")]
     worst = "Undefined"
-    for h in visible:
+    for h in hits:
         level = THREAT_LEVELS.get(h.get("Event", {}).get("threat_level_id"), "Undefined")
         if threat_rank[level] > threat_rank[worst]:
             worst = level
     return {
         "seen_in_misp": bool(hits),
         "event_count": len({h.get("event_id") for h in hits if h.get("event_id")}),
-        "detection_flagged": any(h.get("to_ids") for h in visible),
+        "detection_flagged": any(h.get("to_ids") for h in hits),
         "max_threat_level": worst,
         "restricted_hits": sum(1 for h in hits if h.get("is_restricted")),
     }
@@ -511,9 +512,9 @@ async def misp_correlate_ioc(params: IocInput) -> str:
             event_id = hit.get("event_id")
             if not event_id or event_id in seen:
                 continue
-            seen.add(event_id)
             if hit.get("is_restricted") and not _show_restricted():
                 continue
+            seen.add(event_id)
             event = await client.get_event(event_id)
             if event is None:
                 continue
@@ -567,14 +568,13 @@ async def misp_get_event(params: EventInput) -> str:
         return json.dumps(
             {"id": params.event_id, "restricted": True, "note": REDACTION_NOTE}, indent=2
         )
-    threat_levels = {"1": "High", "2": "Medium", "3": "Low", "4": "Undefined"}
     attributes = event.get("Attribute", [])
     return json.dumps(
         {
             "id": event.get("id"),
             "info": event.get("info"),
             "date": event.get("date"),
-            "threat_level": threat_levels.get(event.get("threat_level_id"), "Undefined"),
+            "threat_level": THREAT_LEVELS.get(event.get("threat_level_id"), "Undefined"),
             "creator_org": event.get("Orgc", {}).get("name"),
             "tags": sorted(client._tag_names(event)),
             "attribute_count": len(attributes),
@@ -1578,7 +1578,9 @@ async def misp_worker_status() -> str:
     a non-admin key gets a clear permission error.
 
     Returns JSON: {"queues": [{"queue", "workers", "jobs"}], "raw_ok": bool}
-    summarizing each worker queue and whether any are dead/backed up.
+    - for each queue, how many workers are running and how many jobs are
+    pending. A queue with 0 workers but pending jobs is stuck; a large jobs
+    count is a backlog. raw_ok is false if no queue data could be read.
     """
     try:
         data = await _get_client().workers()
@@ -1590,7 +1592,7 @@ async def misp_worker_status() -> str:
             queues.append({
                 "queue": name,
                 "workers": info.get("workers"),
-                "jobs": info.get("jobCount") or info.get("jobs"),
+                "jobs": info.get("jobCount") if info.get("jobCount") is not None else info.get("jobs"),
             })
     return json.dumps({"queues": queues, "raw_ok": bool(queues)}, indent=2)
 
@@ -1621,7 +1623,7 @@ async def misp_jobs(params: JobsInput) -> str:
     that did not finish cleanly.
     """
     try:
-        jobs = await _get_client().jobs(limit=max(params.limit * 3, params.limit))
+        jobs = await _get_client().jobs(limit=params.limit * 3)
     except Exception as e:
         return _error(e)
 
@@ -1633,7 +1635,6 @@ async def misp_jobs(params: JobsInput) -> str:
     rows = []
     for j in jobs:
         status = _status(j)
-        failed = status == "failed" or (j.get("progress") not in (100, "100") and status == "done")
         if params.only_failed and status != "failed":
             continue
         rows.append({

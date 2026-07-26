@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/version-1.5.0-informational" alt="version 1.5.0">
   <img src="https://img.shields.io/badge/license-Apache--2.0-lightgrey" alt="license Apache-2.0">
   <img src="https://img.shields.io/badge/python-3.10%2B-informational" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-67%20passing-lightgrey" alt="67 tests passing">
+  <a href="https://github.com/indranilroy99/misp-mcp/actions/workflows/ci.yml"><img src="https://github.com/indranilroy99/misp-mcp/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
 </p>
 
 ---
@@ -23,9 +23,10 @@ misp-mcp connects [MISP](https://www.misp-project.org/) to any
 Cursor, and others). You ask in plain language, the client calls MISP, you get
 the answer. No MISP UI, no REST calls by hand.
 
-It exposes **22 tools**: 19 read (indicators, events, feeds, the galaxy /
-taxonomy / tag knowledge base, warninglist checks, worker/job health), 2 gated
-write (add indicators, single + bulk), and 1 optional enrichment bridge. Every
+It exposes **21 tools**: 19 read (indicators, events, feeds, the galaxy /
+taxonomy / tag knowledge base, warninglist checks, worker/job health) and 2
+gated write (add indicators, single + bulk); a 22nd optional enrichment bridge
+registers only when `TI_LOOKUP_URL` is set. Every
 call runs under **your own MISP key** - the server holds no credential of its
 own.
 
@@ -315,6 +316,7 @@ ALB with TLS.
 | `MISP_MCP_TLS_CERT` / `MISP_MCP_TLS_KEY` | hosted | none | serve HTTPS directly |
 | `MISP_MCP_ALLOW_INSECURE_BIND` | hosted | `false` | allow a public plain-HTTP bind (TLS on a proxy) |
 | `TI_LOOKUP_URL` | both | unset | optional enrichment endpoint (enables `misp_enrich_ioc`) |
+| `TI_LOOKUP_TIMEOUT` | both | `30` | seconds to wait on the enrichment endpoint (floor 5) |
 
 </details>
 
@@ -324,7 +326,7 @@ ALB with TLS.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest tests/ -q            # 67 tests, offline
+.venv/bin/python -m pytest tests/ -q            # full suite, fully offline
 ```
 
 ```
