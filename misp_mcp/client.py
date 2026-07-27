@@ -332,18 +332,22 @@ class MispClient:
 
     # --- warninglists + operational health ---------------------------------
 
-    async def check_warninglists(self, values: list[str]) -> dict:
-        """POST /warninglists/checkValue: for each value, the warninglists it
-        matches (known-good / noise lists like public DNS, Alexa, bogons).
-        A non-empty match is a strong false-positive signal. Returns the raw
-        {value: [matches]} map (tolerant to list-or-dict match entries).
+    async def check_warninglists(self, values: list[str]) -> dict | list:
+        """POST /warninglists/checkValue: for each submitted value, the
+        warninglists it matches (known-good / noise lists like public DNS,
+        Alexa, bogons). A non-empty match is a strong false-positive signal.
+
+        Returns MISP's raw result unchanged. Its shape varies by version -
+        keyed by the value string, keyed by the value's index ("0","1",...),
+        or a positional list - so the caller resolves matches by value AND
+        index (misp_check_warninglist._matches_for).
 
         The endpoint expects the bare JSON array as the request body (the
         shape PyMISP sends); a wrapped {"value": [...]} object gets HTTP 500
         from MISP 2.5.x (verified live)."""
         resp = await self._request("POST", "/warninglists/checkValue", json=values)
         body = resp.json()
-        return body if isinstance(body, dict) else {}
+        return body if isinstance(body, (dict, list)) else {}
 
     async def workers(self) -> dict:
         """GET /servers/getWorkers: background worker/queue health. Requires an

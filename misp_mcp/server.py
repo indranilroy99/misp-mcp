@@ -1552,9 +1552,21 @@ async def misp_check_warninglist(params: WarninglistInput) -> str:
                 out.append(m)
         return [str(n) for n in out if n]
 
+    def _matches_for(idx: int, value: str):
+        # MISP's checkValue response shape varies by version: a dict keyed by
+        # the value string, a dict keyed by the value's index ("0","1",...), or
+        # a positional list. Resolve all three. IOC values (IPs/domains/hashes)
+        # never collide with a small integer index key, so value-first is safe.
+        if isinstance(raw, dict):
+            by_value = raw.get(value)
+            return by_value if by_value is not None else raw.get(str(idx))
+        if isinstance(raw, list):
+            return raw[idx] if idx < len(raw) else None
+        return None
+
     results = []
-    for ioc in normalized:
-        lists = _names(raw.get(ioc))
+    for idx, ioc in enumerate(normalized):
+        lists = _names(_matches_for(idx, ioc))
         results.append({"ioc": ioc, "on_warninglist": bool(lists), "lists": lists})
     return json.dumps(
         {"total": len(results),

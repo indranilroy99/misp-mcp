@@ -745,6 +745,40 @@ def test_check_warninglist_flags_known_good():
     assert clean["on_warninglist"] is False and clean["lists"] == []
 
 
+def test_check_warninglist_handles_index_keyed_response():
+    # Some MISP versions key checkValue by the value's index, not the value.
+    c = _fake_client()
+
+    async def cw(values):
+        return {"1": [{"name": "List of RFC 1918 CIDR blocks"}]}  # only index 1 matched
+
+    c.check_warninglists = cw
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_check_warninglist(
+        server.WarninglistInput(iocs=["zzznomatch", "10.0.0.1"]))))
+    assert out["flagged"] == 1
+    hit = next(r for r in out["results"] if r["ioc"] == "10.0.0.1")
+    clean = next(r for r in out["results"] if r["ioc"] == "zzznomatch")
+    assert hit["on_warninglist"] is True and "RFC 1918" in hit["lists"][0]
+    assert clean["on_warninglist"] is False
+
+
+def test_check_warninglist_handles_positional_list_response():
+    # PHP serializes a sequential-index array as a JSON list, not an object.
+    c = _fake_client()
+
+    async def cw(values):
+        return [[{"name": "List of bogon networks"}], []]
+
+    c.check_warninglists = cw
+    server._get_client = lambda: c
+    out = json.loads(run(server.misp_check_warninglist(
+        server.WarninglistInput(iocs=["10.0.0.1", "1.2.3.4"]))))
+    assert out["flagged"] == 1
+    assert out["results"][0]["on_warninglist"] is True
+    assert out["results"][1]["on_warninglist"] is False
+
+
 def test_worker_status_summarizes_queues():
     c = _fake_client()
 
