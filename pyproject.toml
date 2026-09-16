@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Indranil Roy" }]
 keywords = ["mcp", "misp", "threat-intelligence", "security", "claude"]
 dependencies = [
-    "mcp==1.28.1",
+    "mcp==2.2.0",
     "httpx==0.28.1",
     "pydantic==2.13.4",
     "uvicorn==0.51.0",
